@@ -19,7 +19,15 @@ AVAILABLE_SPREADS = [s for spreads in REGION_SPREADS.values() for s in spreads]
 
 def render_sidebar_controls(df: pd.DataFrame) -> Dict[str, Any]:
     """Render shared sidebar controls and return a controls dict."""
-    st.sidebar.title("Filters")
+    with st.sidebar:
+        st.markdown(
+            """
+            <div class="sidebar-content">
+                <div class="sidebar-title" style="margin-bottom: 1.2rem;">Filters</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     # ── 1. Region selector — MUST be first ────────────────────────────────
     region = st.sidebar.selectbox(

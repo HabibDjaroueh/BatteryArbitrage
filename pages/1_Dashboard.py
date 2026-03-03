@@ -31,7 +31,6 @@ def main() -> None:
         """
         <div style="background-color: #161b22; border-bottom: 1px solid #30363d; padding: 24px 8px; margin: -1rem -1rem 2rem -1rem; width: 100%;">
             <div>
-                <div style="font-family: 'Courier New', monospace; font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.6;">DASHBOARD</div>
                 <div style="font-family: 'Courier New', monospace; font-size: 40px; font-weight: 700; color: #58a6ff; letter-spacing: 0.05em; margin: 4px 0 0 0; line-height: 1.1;">DAM Price Spreads</div>
             </div>
         </div>

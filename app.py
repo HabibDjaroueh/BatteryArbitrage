@@ -233,7 +233,7 @@ def main() -> None:
             </div>
             <div class="kpi-tile">
                 <div class="kpi-label">Horizon</div>
-                <div class="kpi-value">2023–2025</div>
+                <div class="kpi-value">2022–2025</div>
             </div>
             <div class="kpi-tile">
                 <div class="kpi-label">Mode</div>

@@ -233,7 +233,7 @@ def generate_summary(
         f"**Model target:** {target_label}  \n"
         f"**Top drivers:** {top3[0]}, {top3[1]}, and {top3[2]} "
         f"account for the largest share of predictive power.  \n"
-        f"**Performance:** MAE = ${mae:.2f}/MWh · RMSE = ${rmse:.2f}/MWh"
+        f"**Performance:** MAE = \\${mae:.2f}/MWh · RMSE = \\${rmse:.2f}/MWh"
     )
 
     if direction_acc is not None:
