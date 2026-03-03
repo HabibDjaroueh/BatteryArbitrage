@@ -7,20 +7,49 @@ st.set_page_config(
 
 
 def main() -> None:
-    st.title("Application")
+    st.title("ERCOT Battery Trading & Market Analytics")
     st.subheader(
-        "Explore ERCOT DAM price spreads, their drivers, and battery arbitrage opportunities."
+        "Understanding battery economics through forecast-driven DAM bidding simulation"
     )
 
+    st.markdown("""
+    ### The Problem
+    
+    Grid-scale batteries in ERCOT must commit to day-ahead schedules before knowing actual prices. 
+    This tool helps answer: **How do forecast errors impact battery revenue?** and **What drives 
+    profitable arbitrage opportunities?**
+    """)
+
     st.markdown("### What you can do in this app")
-    st.markdown(
-        """
-- **Dashboard — DAM Price Spreads**: High-level view of zonal DAM spreads across ERCOT load zones.
-- **Spread Drivers**: Inspect which fundamentals (load, weather, renewables) explain specific spreads.
-- **Battery Simulation**: Sketch how a grid-scale battery could charge and discharge across spreads.
-- **Data QA**: Review basic coverage and sanity checks on the underlying datasets.
-        """
-    )
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        **📊 Dashboard**
+        
+        Explore DAM price spreads across ERCOT load zones. Identify when and where 
+        arbitrage opportunities exist through time series analysis, histograms, and 
+        opportunity tables.
+        
+        **🔍 Spread Drivers**
+        
+        Train XGBoost models to predict prices. Understand which fundamentals 
+        (load, weather, renewables) drive spreads and evaluate forecast accuracy.
+        """)
+    
+    with col2:
+        st.markdown("""
+        **🔋 Battery Simulation**
+        
+        Configure a Houston BESS and simulate forecast-driven DAM bidding. Compare 
+        forecast-driven revenue to perfect-foresight benchmarks to quantify the cost 
+        of forecast uncertainty.
+        
+        **✅ Data QA**
+        
+        Review data coverage, missing values, and quality checks across regional datasets.
+        """)
 
     with st.sidebar:
         st.markdown("## Application")
