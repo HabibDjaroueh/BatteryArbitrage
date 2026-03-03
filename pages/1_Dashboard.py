@@ -26,7 +26,19 @@ from src.tables import build_opportunity_table
 
 
 def main() -> None:
-    st.title("DAM Price Spreads")
+    # Header bar (terminal style matching app.py)
+    st.markdown(
+        """
+        <div style="background-color: #161b22; border-bottom: 1px solid #30363d; padding: 24px 8px; margin: -1rem -1rem 2rem -1rem; display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <div>
+                <div style="font-family: 'Courier New', monospace; font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.6;">DASHBOARD</div>
+                <div style="font-family: 'Courier New', monospace; font-size: 40px; font-weight: 700; color: #58a6ff; letter-spacing: 0.05em; margin: 4px 0 0 0; line-height: 1.1;">DAM Price Spreads</div>
+            </div>
+            <div style="font-family: 'Courier New', monospace; font-size: 16px; color: #8b949e; opacity: 0.6; text-align: right;">ERCOT wholesale price spread intelligence</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     # 1. Load + shared sidebar controls
     base_df = load_region_df("coast")
@@ -43,39 +55,45 @@ def main() -> None:
         st.warning("No spread columns found for this region.")
         return
 
-    st.subheader("Spread Selection")
+    # Control Panel (terminal style)
+    st.markdown(
+        '<div style="font-family: \'Courier New\', monospace; font-size: 1.1rem; color: #58a6ff; text-transform: uppercase; letter-spacing: 0.1em; margin: 2rem 0 1rem 0; border-bottom: 1px solid #30363d; padding-bottom: 0.5rem;">Control Panel</div>',
+        unsafe_allow_html=True,
+    )
 
-    overlay_col1, overlay_col2, overlay_col3 = st.columns([2, 2, 1])
+    # Controls container
+    with st.container(border=True):
+        overlay_col1, overlay_col2, overlay_col3 = st.columns([2, 2, 1])
 
-    with overlay_col1:
-        primary_spread = st.selectbox(
-            "Primary Spread",
-            options=available_spreads,
-            index=(
-                available_spreads.index(controls["spread"])
-                if controls["spread"] and controls["spread"] in available_spreads
-                else 0
-            ),
-            format_func=lambda x: x.replace("spread_", "").replace("_", " → ").upper(),
-            help="Primary spread — drives KPIs, regime tabs, and opportunity table"
-        )
+        with overlay_col1:
+            primary_spread = st.selectbox(
+                "Primary",
+                options=available_spreads,
+                index=(
+                    available_spreads.index(controls["spread"])
+                    if controls["spread"] and controls["spread"] in available_spreads
+                    else 0
+                ),
+                format_func=lambda x: x.replace("spread_", "").replace("_", " → ").upper(),
+                help="Primary spread — drives KPIs, regime tabs, and opportunity table"
+            )
 
-    with overlay_col2:
-        overlay_options = ["None"] + [s for s in available_spreads if s != primary_spread]
-        overlay_spread  = st.selectbox(
-            "Overlay Spread (optional)",
-            options=overlay_options,
-            index=0,
-            format_func=lambda x: (
-                "— No Overlay —"
-                if x == "None"
-                else x.replace("spread_", "").replace("_", " → ").upper()
-            ),
-            help="Optional second spread overlaid on both charts in a contrasting color"
-        )
+        with overlay_col2:
+            overlay_options = ["None"] + [s for s in available_spreads if s != primary_spread]
+            overlay_spread  = st.selectbox(
+                "Overlay",
+                options=overlay_options,
+                index=0,
+                format_func=lambda x: (
+                    "— No Overlay —"
+                    if x == "None"
+                    else x.replace("spread_", "").replace("_", " → ").upper()
+                ),
+                help="Optional second spread overlaid on both charts in a contrasting color"
+            )
 
-    with overlay_col3:
-        show_rolling = st.toggle("30D Rolling Mean", value=True)
+        with overlay_col3:
+            show_rolling = st.toggle("30D Roll", value=True)
 
     # Build selected spreads list — 1 or 2 entries
     selected_spreads = (
@@ -90,7 +108,10 @@ def main() -> None:
     load_col   = get_load_col(controls["region"])
 
     # 2. Market Snapshot — one row per selected spread
-    st.subheader("Market Snapshot")
+    st.markdown(
+        '<div style="font-family: \'Courier New\', monospace; font-size: 1.1rem; color: #58a6ff; text-transform: uppercase; letter-spacing: 0.1em; margin: 2rem 0 1rem 0; border-bottom: 1px solid #30363d; padding-bottom: 0.5rem;">Market Snapshot</div>',
+        unsafe_allow_html=True,
+    )
 
     header_cols = st.columns([1.2, 1, 1, 1, 1, 1])
     header_cols[0].markdown("**Spread**")
@@ -187,16 +208,29 @@ def main() -> None:
     col_left, col_right = st.columns([1, 1])
 
     with col_left:
-        fig_ts = spread_time_series(filtered_df, selected_spreads, show_rolling)
-        st.plotly_chart(fig_ts, use_container_width=True)
+        with st.container(border=True):
+            st.markdown(
+                '<div style="font-family: \'Courier New\', monospace; font-size: 0.85rem; color: #58a6ff; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.75rem;">Spread Time Series</div>',
+                unsafe_allow_html=True,
+            )
+            fig_ts = spread_time_series(filtered_df, selected_spreads, show_rolling)
+            st.plotly_chart(fig_ts, use_container_width=True)
 
     with col_right:
-        fig_hist = spread_histogram(filtered_df, selected_spreads)
-        st.plotly_chart(fig_hist, use_container_width=True)
+        with st.container(border=True):
+            st.markdown(
+                '<div style="font-family: \'Courier New\', monospace; font-size: 0.85rem; color: #58a6ff; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.75rem;">Distribution</div>',
+                unsafe_allow_html=True,
+            )
+            fig_hist = spread_histogram(filtered_df, selected_spreads)
+            st.plotly_chart(fig_hist, use_container_width=True)
 
     # 6. Regime tabs
     st.divider()
-    st.subheader("Why Is This Spread Happening?")
+    st.markdown(
+        '<div style="font-family: \'Courier New\', monospace; font-size: 1.1rem; color: #58a6ff; text-transform: uppercase; letter-spacing: 0.1em; margin: 2rem 0 1rem 0; border-bottom: 1px solid #30363d; padding-bottom: 0.5rem;">Why Is This Spread Happening?</div>',
+        unsafe_allow_html=True,
+    )
 
     tab1, tab2, tab3 = st.tabs(
         [
@@ -215,18 +249,20 @@ def main() -> None:
             "The orange dotted line shows heat index (°F) — when both load "
             "and heat index are high simultaneously, spread spikes are most likely."
         )
-        fig_nl = net_load_vs_spread(
-            filtered_df, spread_col, load_col, controls["region"]
-        )
-        st.plotly_chart(fig_nl, use_container_width=True)
+        with st.container(border=True):
+            fig_nl = net_load_vs_spread(
+                filtered_df, spread_col, load_col, controls["region"]
+            )
+            st.plotly_chart(fig_nl, use_container_width=True)
 
     with tab2:
         st.caption(
             "How do wind and solar suppress or amplify the spread? "
             "Green markers = positive spread, red = negative."
         )
-        fig_re = renewables_vs_spread(filtered_df, spread_col, controls["region"])
-        st.plotly_chart(fig_re, use_container_width=True)
+        with st.container(border=True):
+            fig_re = renewables_vs_spread(filtered_df, spread_col, controls["region"])
+            st.plotly_chart(fig_re, use_container_width=True)
 
     with tab3:
         st.caption(
@@ -250,8 +286,9 @@ def main() -> None:
                 "Look for periods where net load spikes coincide "
                 "with spread widening — these are the high-value dispatch windows."
             )
-            fig_nl_ts = net_load_time_series(filtered_df, load_col, spread_col)
-            st.plotly_chart(fig_nl_ts, use_container_width=True)
+            with st.container(border=True):
+                fig_nl_ts = net_load_time_series(filtered_df, load_col, spread_col)
+                st.plotly_chart(fig_nl_ts, use_container_width=True)
 
         with subtab2:
             st.caption(
@@ -260,12 +297,16 @@ def main() -> None:
                 "The steepening evening ramp is the primary battery "
                 "arbitrage opportunity — charge in the trough, discharge on the ramp."
             )
-            fig_duck = net_load_duck_curve(filtered_df, load_col)
-            st.plotly_chart(fig_duck, use_container_width=True)
+            with st.container(border=True):
+                fig_duck = net_load_duck_curve(filtered_df, load_col)
+                st.plotly_chart(fig_duck, use_container_width=True)
 
     # 7. Opportunity table + export
     st.divider()
-    st.subheader("🎯 Spread Opportunities")
+    st.markdown(
+        '<div style="font-family: \'Courier New\', monospace; font-size: 1.1rem; color: #58a6ff; text-transform: uppercase; letter-spacing: 0.1em; margin: 2rem 0 1rem 0; border-bottom: 1px solid #30363d; padding-bottom: 0.5rem;">Spread Opportunities</div>',
+        unsafe_allow_html=True,
+    )
     st.caption(
         "Hourly observations ranked by absolute spread magnitude. "
         "Positive spread = selected zone is premium vs counterpart. "
@@ -273,89 +314,93 @@ def main() -> None:
         "Use this table to identify specific windows for battery dispatch."
     )
 
-    ctrl1, ctrl2, ctrl3 = st.columns([2, 2, 1])
+    # Controls container
+    with st.container(border=True):
+        ctrl1, ctrl2, ctrl3 = st.columns([2, 2, 1])
 
-    with ctrl1:
-        top_n = st.slider(
-            "Top N Opportunities",
-            min_value=10,
-            max_value=500,
-            value=50,
-            step=10,
-            help="Show the N hours with the largest absolute spread",
+        with ctrl1:
+            top_n = st.slider(
+                "Top N Opportunities",
+                min_value=10,
+                max_value=500,
+                value=50,
+                step=10,
+                help="Show the N hours with the largest absolute spread",
+            )
+
+        with ctrl2:
+            direction_filter = st.selectbox(
+                "Direction Filter",
+                options=["All", "Premium Only (▲)", "Discount Only (▼)"],
+                help="Filter by spread direction",
+            )
+
+        opp_df = build_opportunity_table(
+            filtered_df, spread_col, load_col, controls["region"]
         )
 
-    with ctrl2:
-        direction_filter = st.selectbox(
-            "Direction Filter",
-            options=["All", "Premium Only (▲)", "Discount Only (▼)"],
-            help="Filter by spread direction",
+        if direction_filter == "Premium Only (▲)":
+            opp_df = opp_df[opp_df["Direction"] == "▲ Premium"]
+        elif direction_filter == "Discount Only (▼)":
+            opp_df = opp_df[opp_df["Direction"] == "▼ Discount"]
+
+        opp_df_display = opp_df.head(top_n)
+
+        with ctrl3:
+            st.download_button(
+                label="⬇️ Export CSV",
+                data=opp_df_display.to_csv(index=False).encode("utf-8"),
+                file_name=f"opportunities_{spread_col}_{controls['region']}.csv",
+                mime="text/csv",
+                help="Download the current table as a CSV file",
+            )
+
+    # Table container
+    with st.container(border=True):
+        st.dataframe(
+            opp_df_display,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Datetime": st.column_config.TextColumn(
+                    "Datetime", width="medium"
+                ),
+                "Spread ($/MWh)": st.column_config.NumberColumn(
+                    "Spread ($/MWh)",
+                    format="$%.2f",
+                    width="small"
+                ),
+                "Direction": st.column_config.TextColumn(
+                    "Direction", width="small"
+                ),
+                "Hour": st.column_config.NumberColumn(
+                    "Hour",
+                    format="%d:00",
+                    width="small",
+                    help="Hour of day (0–23)"
+                ),
+                "Wind Gen (MW)": st.column_config.NumberColumn(
+                    "Wind Gen (MW)",
+                    format="%.1f MW",
+                    width="small",
+                    help="Regional wind generation at time of spread"
+                ),
+                "Net Load (%)": st.column_config.ProgressColumn(
+                    "Net Load (%)",
+                    format="%.1f%%",
+                    min_value=0,
+                    max_value=100,
+                    width="medium",
+                    help="Net load as % of gross load — high % means renewables covering little demand"
+                ),
+                "Heat Index (°F)": st.column_config.NumberColumn(
+                    "Heat Index (°F)",
+                    format="%.1f °F",
+                    width="small",
+                    help="Felt temperature accounting for humidity — driver of AC load"
+                ),
+            }
         )
-
-    opp_df = build_opportunity_table(
-        filtered_df, spread_col, load_col, controls["region"]
-    )
-
-    if direction_filter == "Premium Only (▲)":
-        opp_df = opp_df[opp_df["Direction"] == "▲ Premium"]
-    elif direction_filter == "Discount Only (▼)":
-        opp_df = opp_df[opp_df["Direction"] == "▼ Discount"]
-
-    opp_df_display = opp_df.head(top_n)
-
-    with ctrl3:
-        st.download_button(
-            label="⬇️ Export CSV",
-            data=opp_df_display.to_csv(index=False).encode("utf-8"),
-            file_name=f"opportunities_{spread_col}_{controls['region']}.csv",
-            mime="text/csv",
-            help="Download the current table as a CSV file",
-        )
-
-    st.dataframe(
-        opp_df_display,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Datetime": st.column_config.TextColumn(
-                "Datetime", width="medium"
-            ),
-            "Spread ($/MWh)": st.column_config.NumberColumn(
-                "Spread ($/MWh)",
-                format="$%.2f",
-                width="small"
-            ),
-            "Direction": st.column_config.TextColumn(
-                "Direction", width="small"
-            ),
-            "Hour": st.column_config.NumberColumn(
-                "Hour",
-                format="%d:00",
-                width="small",
-                help="Hour of day (0–23)"
-            ),
-            "Wind Gen (MW)": st.column_config.NumberColumn(
-                "Wind Gen (MW)",
-                format="%.1f MW",
-                width="small",
-                help="Regional wind generation at time of spread"
-            ),
-            "Net Load (%)": st.column_config.ProgressColumn(
-                "Net Load (%)",
-                format="%.1f%%",
-                min_value=0,
-                max_value=100,
-                width="medium",
-                help="Net load as % of gross load — high % means renewables covering little demand"
-            ),
-            "Heat Index (°F)": st.column_config.NumberColumn(
-                "Heat Index (°F)",
-                format="%.1f °F",
-                width="small",
-                help="Felt temperature accounting for humidity — driver of AC load"
-            ),
-        }
-    )
 
     if len(opp_df_display) > 0:
         st.caption(
@@ -373,5 +418,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
