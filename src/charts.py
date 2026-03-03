@@ -58,8 +58,9 @@ def spread_time_series(
     """
 
     fig = go.Figure()
+    is_overlay = len(spread_cols) == 2
 
-    for spread_col in spread_cols[:2]:   # hard cap at 2
+    for idx, spread_col in enumerate(spread_cols[:2]):   # hard cap at 2
         if spread_col not in df.columns:
             continue
 
@@ -68,14 +69,26 @@ def spread_time_series(
         daily   = df[spread_col].resample("D").mean()
         rolling = daily.rolling(30).mean()
 
+        # Case 1: Primary raw series (idx=0)
+        # Case 3: Overlay raw series (idx=1, is_overlay=True)
+        if is_overlay and idx == 1:
+            # Overlay raw: dashed, thinner, lighter blue
+            overlay_color = "#7ab8ff"  # lighter blue
+            line_style = dict(color=overlay_color, width=1.0, dash="dash")
+            line_opacity = 0.75
+        else:
+            # Primary raw: solid, normal width, normal color
+            line_style = dict(color=color, width=1.5)
+            line_opacity = 0.85
+
         # Daily spread line
         fig.add_trace(go.Scatter(
             x=daily.index,
             y=daily.values,
             name=label,
             mode="lines",
-            line=dict(color=color, width=1.5),
-            opacity=0.85,
+            line=line_style,
+            opacity=line_opacity,
             hovertemplate=(
                 f"<b>{label}</b><br>"
                 "%{x|%b %d %Y}<br>"
@@ -83,15 +96,27 @@ def spread_time_series(
             )
         ))
 
-        # 30D rolling mean — dotted, same color
+        # Case 2: Primary 30D MA (idx=0)
+        # Case 4: Overlay 30D MA (idx=1, is_overlay=True)
         if show_rolling:
+            if is_overlay and idx == 1:
+                # Overlay 30D MA: dashed, thinner, lighter blue, lower opacity
+                rolling_color = overlay_color
+                rolling_style = dict(color=rolling_color, width=1.5, dash="dash")
+                rolling_opacity = 0.6
+            else:
+                # Primary 30D MA: wider, dashed, lighter blue, more prominent
+                rolling_color = "#93C5FD"  # lighter blue for prominence
+                rolling_style = dict(color=rolling_color, width=3.0, dash="dash")
+                rolling_opacity = 0.9
+            
             fig.add_trace(go.Scatter(
                 x=rolling.index,
                 y=rolling.values,
                 name=f"{label} 30D MA",
                 mode="lines",
-                line=dict(color=color, width=2, dash="dot"),
-                opacity=0.5,
+                line=rolling_style,
+                opacity=rolling_opacity,
                 hovertemplate=(
                     f"<b>{label} 30D MA</b><br>"
                     "%{x|%b %d %Y}<br>"
@@ -151,6 +176,7 @@ def spread_histogram(
     """
 
     fig = go.Figure()
+    is_overlay = len(spread_cols) == 2
 
     for i, spread_col in enumerate(spread_cols[:2]):   # hard cap at 2
         if spread_col not in df.columns:
@@ -166,13 +192,37 @@ def spread_histogram(
         p50 = values.quantile(0.50)
         p90 = values.quantile(0.90)
 
+        # Case 1: Primary histogram bars (i=0)
+        # Case 3: Overlay histogram bars (i=1, is_overlay=True)
+        if is_overlay and i == 1:
+            # Overlay histogram: lighter blue, lower opacity, more subdued
+            overlay_color = "#7ab8ff"  # lighter blue
+            histogram_color = overlay_color
+            histogram_opacity = 0.35  # lower opacity for overlay
+        else:
+            # Primary histogram: normal color, higher opacity for prominence
+            histogram_color = color
+            histogram_opacity = 0.7 if len(spread_cols) == 2 else 0.8  # higher opacity for primary
+        
+        # Case 2: Primary percentile lines (i=0)
+        # Case 4: Overlay percentile lines (i=1, is_overlay=True)
+        if is_overlay and i == 1:
+            # Overlay percentile lines: thinner, lighter blue, dashed
+            overlay_color = "#7ab8ff"  # lighter blue
+            p50_line_style = dict(color=overlay_color, width=2.5, dash="dash")  # thicker for visibility
+            p50_color = overlay_color
+        else:
+            # Primary percentile lines: wider, brighter, more prominent
+            p50_line_style = dict(color="#58a6ff", width=3.0, dash="dash")  # bright blue, thick for visibility
+            p50_color = "#58a6ff"  # bright blue for visibility
+
         # Histogram trace
         fig.add_trace(go.Histogram(
             x=values,
             name=label,
             nbinsx=80,
-            marker_color=color,
-            opacity=0.55 if len(spread_cols) == 2 else 0.75,
+            marker_color=histogram_color,
+            opacity=histogram_opacity,
             hovertemplate=(
                 f"<b>{label}</b><br>"
                 "Spread: $%{x:.2f}/MWh<br>"
@@ -185,8 +235,9 @@ def spread_histogram(
         fig.add_shape(
             type="line",
             x0=p50, x1=p50, y0=0, y1=1, yref="paper",
-            line=dict(color=color, width=1.5, dash="dash")
+            line=p50_line_style
         )
+        annotation_color = p50_color  # Use p50_color which is already set correctly for both cases
         fig.add_annotation(
             x=p50,
             y=0.92 - (i * 0.15),   # second spread annotation sits lower
@@ -194,12 +245,12 @@ def spread_histogram(
             text=f"<b>{label} P50: ${p50:.1f}</b>",
             showarrow=True,
             arrowhead=2,
-            arrowcolor=color,
+            arrowcolor=annotation_color,
             arrowwidth=1,
             ax=45, ay=0,
-            font=dict(color=color, size=10),
+            font=dict(color=annotation_color, size=10),
             bgcolor="#0a0e17",
-            bordercolor=color,
+            bordercolor=annotation_color,
             borderwidth=1,
             borderpad=3,
         )
@@ -213,7 +264,7 @@ def spread_histogram(
                 fig.add_shape(
                     type="line",
                     x0=val, x1=val, y0=0, y1=1, yref="paper",
-                    line=dict(color=color, width=1, dash="dot")
+                    line=dict(color="#58a6ff", width=2.5, dash="dot")  # bright blue, thick for visibility
                 )
                 fig.add_annotation(
                     x=val,
@@ -222,13 +273,13 @@ def spread_histogram(
                     text=f"<b>{pct_label}</b>",
                     showarrow=True,
                     arrowhead=2,
-                    arrowcolor=color,
-                    arrowwidth=1,
+                    arrowcolor="#58a6ff",  # bright blue for visibility
+                    arrowwidth=1.5,  # thicker arrow
                     ax=45, ay=0,
-                    font=dict(color=color, size=10),
+                    font=dict(color="#58a6ff", size=10),  # bright blue for visibility
                     bgcolor="#0a0e17",
-                    bordercolor=color,
-                    borderwidth=1,
+                    bordercolor="#58a6ff",  # bright blue for visibility
+                    borderwidth=1.5,  # thicker border
                     borderpad=3,
                 )
 
@@ -394,8 +445,8 @@ def renewables_vs_spread(
     fig = go.Figure()
 
     for gen_col, color, name in [
-        (wind_col, "#a78bfa", "Wind"),
-        (solar_col, "#fbbf24", "Solar"),
+        (wind_col, "#3b82f6", "Wind"),  # Darker blue for Wind - still visible on dark background
+        (solar_col, "#38bdf8", "Solar"),  # Sky blue/cyan for Solar - more distinct
     ]:
         if gen_col is None:
             continue
@@ -418,11 +469,7 @@ def renewables_vs_spread(
         if binned.empty:
             continue
 
-        marker_colors = [
-            "#34d399" if v >= 0 else "#f87171"
-            for v in binned["avg_spread"]
-        ]
-
+        # Use same color as line for markers - minimalistic, no red/green
         fig.add_trace(
             go.Scatter(
                 x=binned["avg_re"],
@@ -430,7 +477,7 @@ def renewables_vs_spread(
                 mode="lines+markers",
                 name=name,
                 line=dict(color=color, width=2),
-                marker=dict(size=8, color=marker_colors),
+                marker=dict(size=6, color=color, opacity=0.7),  # Same color as line, slightly transparent
                 hovertemplate=(
                     f"{name}: " + "%{x:,.0f} MW<br>"
                     "Spread: $%{y:.2f}/MWh<extra></extra>"

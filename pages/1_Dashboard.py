@@ -29,12 +29,11 @@ def main() -> None:
     # Header bar (terminal style matching app.py)
     st.markdown(
         """
-        <div style="background-color: #161b22; border-bottom: 1px solid #30363d; padding: 24px 8px; margin: -1rem -1rem 2rem -1rem; display: flex; justify-content: space-between; align-items: center; width: 100%;">
+        <div style="background-color: #161b22; border-bottom: 1px solid #30363d; padding: 24px 8px; margin: -1rem -1rem 2rem -1rem; width: 100%;">
             <div>
                 <div style="font-family: 'Courier New', monospace; font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.6;">DASHBOARD</div>
                 <div style="font-family: 'Courier New', monospace; font-size: 40px; font-weight: 700; color: #58a6ff; letter-spacing: 0.05em; margin: 4px 0 0 0; line-height: 1.1;">DAM Price Spreads</div>
             </div>
-            <div style="font-family: 'Courier New', monospace; font-size: 16px; color: #8b949e; opacity: 0.6; text-align: right;">ERCOT wholesale price spread intelligence</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -232,11 +231,59 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
+    # Custom tab styling - card-like appearance with light blue and orange
+    st.markdown(
+        """
+        <style>
+        /* Style Streamlit tabs to look like card buttons */
+        div[data-baseweb="tabs"] {
+            background-color: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 8px;
+            margin-bottom: 1rem;
+        }
+        
+        div[data-baseweb="tab-list"] {
+            gap: 8px;
+        }
+        
+        button[data-baseweb="tab"] {
+            font-family: 'Courier New', monospace !important;
+            font-size: 0.9rem !important;
+            background-color: #161b22 !important;
+            color: #58a6ff !important;
+            border: 1px solid #30363d !important;
+            border-radius: 4px !important;
+            padding: 8px 16px !important;
+            transition: all 0.2s ease !important;
+        }
+        
+        button[data-baseweb="tab"]:hover {
+            background-color: #21262d !important;
+            border-color: #58a6ff !important;
+        }
+        
+        button[data-baseweb="tab"][aria-selected="true"] {
+            background-color: #58a6ff !important;
+            color: #0a0e17 !important;
+            border-color: #58a6ff !important;
+            font-weight: 600 !important;
+        }
+        
+        button[data-baseweb="tab"][aria-selected="false"] {
+            color: #58a6ff !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     tab1, tab2, tab3 = st.tabs(
         [
-            "📈  Net Load vs Spread",
-            "🌬️  Renewables vs Spread",
-            "📊  Net Load Views",
+            "Net Load vs Spread",
+            "Renewables vs Spread",
+            "Net Load Views",
         ]
     )
 
@@ -403,14 +450,19 @@ def main() -> None:
         )
 
     if len(opp_df_display) > 0:
-        st.caption(
-            f"Showing top {len(opp_df_display)} of {len(opp_df)} total hours in filtered window  ·  "
-            f"Avg spread: ${opp_df_display['Spread ($/MWh)'].mean():.2f}/MWh  ·  "
-            f"Max spread: ${opp_df_display['Spread ($/MWh)'].abs().max():.2f}/MWh  ·  "
-            f"Premium: {(opp_df_display['Direction'] == '▲ Premium').sum()} hrs  ·  "
-            f"Discount: {(opp_df_display['Direction'] == '▼ Discount').sum()} hrs  ·  "
-            f"Avg Wind: {opp_df_display['Wind Gen (MW)'].mean():,.0f} MW  ·  "
-            f"Avg Net Load: {opp_df_display['Net Load (%)'].mean():.1f}%"
+        avg_spread = opp_df_display['Spread ($/MWh)'].mean()
+        max_spread = opp_df_display['Spread ($/MWh)'].abs().max()
+        st.markdown(
+            f'<div style="font-size: 0.85rem; color: #8b949e; margin-top: 0.5rem;">'
+            f'Showing top {len(opp_df_display)} of {len(opp_df)} total hours in filtered window  ·  '
+            f'<span style="color: #58a6ff;">Avg spread: ${avg_spread:.2f}/MWh</span>  ·  '
+            f'<span style="color: #58a6ff;">Max spread: ${max_spread:.2f}/MWh</span>  ·  '
+            f'Premium: {(opp_df_display["Direction"] == "▲ Premium").sum()} hrs  ·  '
+            f'Discount: {(opp_df_display["Direction"] == "▼ Discount").sum()} hrs  ·  '
+            f'Avg Wind: {opp_df_display["Wind Gen (MW)"].mean():,.0f} MW  ·  '
+            f'Avg Net Load: {opp_df_display["Net Load (%)"].mean():.1f}%'
+            f'</div>',
+            unsafe_allow_html=True,
         )
     else:
         st.caption(f"No rows match the current filters. Total hours in window: {len(opp_df)}.")
