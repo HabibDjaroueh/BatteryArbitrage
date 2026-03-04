@@ -1,3 +1,4 @@
+import pandas as pd
 import streamlit as st
 
 from src.data import load_region_df, get_lz_col, get_load_col
@@ -23,10 +24,47 @@ from src.charts import (
     monthly_summary_bars,
     day_of_week_spread,
     compute_monthly_stats,
+    detect_anomalous_days,
+    anomaly_scatter_chart,
+    build_anomaly_fundamentals,
+    anomaly_fundamentals_radar,
+    find_similar_days,
+    similar_days_spread_distribution,
+    zone_from_column,
+    ZONE_TEMP_COL,
+    ZONE_HUMIDITY_COL,
+    ZONE_HEAT_INDEX_COL,
+    LZ_PRICE_COLS,
     SPREAD_COLOR_MAP,
     _spread_label,
 )
 from src.tables import build_opportunity_table
+
+
+def _card_label(label: str) -> None:
+    """Render a small card label inside a chart container."""
+    st.markdown(
+        f'<div style="font-family: \'Courier New\', monospace; font-size: 0.85rem; '
+        f'color: #58a6ff; text-transform: uppercase; letter-spacing: 0.1em; '
+        f'margin-bottom: 0.75rem;">{label}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _kpi_card(label: str, value: str, color: str = "#58a6ff", sub: str = "") -> None:
+    """Render a styled KPI card with colored value."""
+    sub_html = f'<div style="font-size:0.7rem; color:#8b949e; margin-top:2px;">{sub}</div>' if sub else ""
+    st.markdown(
+        f'<div style="background:#161b22; border:1px solid #30363d; border-radius:6px; '
+        f'padding:12px 16px; text-align:center;">'
+        f'<div style="font-family:\'Courier New\',monospace; font-size:0.7rem; '
+        f'color:#8b949e; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px;">{label}</div>'
+        f'<div style="font-family:\'Courier New\',monospace; font-size:1.4rem; '
+        f'font-weight:700; color:{color};">{value}</div>'
+        f'{sub_html}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def main() -> None:
@@ -284,9 +322,11 @@ def main() -> None:
     )
 
     # Analysis tabs with terminal styling
-    analysis_tab1, analysis_tab2 = st.tabs(
+    analysis_tab1, analysis_tab2, analysis_tab3, analysis_tab4 = st.tabs(
         [
             "Monthly & Day Analysis",
+            "Anomalous Days",
+            "Similar Days Lookup",
             "Spread Regimes",
         ]
     )
@@ -350,6 +390,350 @@ def main() -> None:
                 st.info("No data available for the current filter selection.")
 
     with analysis_tab2:
+        st.caption(
+            f"Identify days where spread behavior was statistically unusual. "
+            "Examine the weather and grid conditions that drove these anomalies "
+            "to build intuition for when extreme spreads are likely."
+        )
+        
+        # Anomaly controls
+        with st.container(border=True):
+            anom_c1, anom_c2, anom_c3 = st.columns([2, 1, 1])
+            
+            with anom_c1:
+                # Column selection dropdown
+                anom_options = list(available_spreads)
+                if controls["region"] == "all":
+                    hub_cols = [c for c in LZ_PRICE_COLS.keys() if c in filtered_df.columns]
+                    anom_options = hub_cols + anom_options
+                
+                _lz_labels = {
+                    "LZ_HOUSTON_DAM": "Houston Hub",
+                    "LZ_SOUTH_DAM": "South Hub", 
+                    "LZ_WEST_DAM": "West Hub",
+                    "LZ_NORTH_DAM": "North Hub",
+                    "LZ_RAYBN_DAM": "Rayburn Hub",
+                }
+                
+                def _anom_label(x):
+                    if x in _lz_labels:
+                        return _lz_labels[x]
+                    return _spread_label(x)
+                
+                anom_col = st.selectbox(
+                    "Column to Analyze",
+                    options=anom_options,
+                    index=anom_options.index(spread_col) if spread_col in anom_options else 0,
+                    format_func=_anom_label,
+                    key="anom_spread_select",
+                )
+            
+            with anom_c2:
+                z_thresh = st.slider(
+                    "Z-Score Threshold",
+                    min_value=1.0, max_value=4.0, value=2.0, step=0.25,
+                    help="Standard deviations from mean. Lower = more anomalies detected.",
+                    key="z_thresh_slider",
+                )
+            
+            with anom_c3:
+                anom_direction = st.selectbox(
+                    "Direction",
+                    options=["Both", "Spikes Only", "Crashes Only"],
+                    key="anom_direction",
+                )
+        
+        # Detect anomalies
+        anomalies = detect_anomalous_days(filtered_df, anom_col, z_thresh)
+        
+        # Filter by direction
+        if anom_direction == "Spikes Only" and not anomalies.empty:
+            anomalies = anomalies[anomalies["direction"] == "Spike"]
+        elif anom_direction == "Crashes Only" and not anomalies.empty:
+            anomalies = anomalies[anomalies["direction"] == "Crash"]
+        
+        # Handle no anomalies case
+        if anomalies.empty:
+            st.info(
+                f"No anomalous days found at z ≥ {z_thresh}. "
+                "Try lowering the threshold or expanding the date range."
+            )
+        else:
+            # Summary KPIs
+            n_spikes = (anomalies["direction"] == "Spike").sum()
+            n_crashes = (anomalies["direction"] == "Crash").sum()
+            max_z = anomalies["z_score"].abs().max()
+            
+            s1, s2, s3, s4 = st.columns(4)
+            
+            with s1:
+                st.markdown(
+                    f'<div style="background:#161b22; border:1px solid #30363d; border-radius:6px; '
+                    f'padding:12px 16px; text-align:center;">'
+                    f'<div style="font-family:\'Courier New\',monospace; font-size:0.7rem; '
+                    f'color:#8b949e; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px;">Anomalous Days</div>'
+                    f'<div style="font-family:\'Courier New\',monospace; font-size:1.4rem; '
+                    f'font-weight:700; color:#58a6ff;">{len(anomalies)}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            
+            with s2:
+                st.markdown(
+                    f'<div style="background:#161b22; border:1px solid #30363d; border-radius:6px; '
+                    f'padding:12px 16px; text-align:center;">'
+                    f'<div style="font-family:\'Courier New\',monospace; font-size:0.7rem; '
+                    f'color:#8b949e; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px;">Spikes</div>'
+                    f'<div style="font-family:\'Courier New\',monospace; font-size:1.4rem; '
+                    f'font-weight:700; color:#58a6ff;">{n_spikes}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            
+            with s3:
+                st.markdown(
+                    f'<div style="background:#161b22; border:1px solid #30363d; border-radius:6px; '
+                    f'padding:12px 16px; text-align:center;">'
+                    f'<div style="font-family:\'Courier New\',monospace; font-size:0.7rem; '
+                    f'color:#8b949e; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px;">Crashes</div>'
+                    f'<div style="font-family:\'Courier New\',monospace; font-size:1.4rem; '
+                    f'font-weight:700; color:#7ab8ff;">{n_crashes}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            
+            with s4:
+                st.markdown(
+                    f'<div style="background:#161b22; border:1px solid #30363d; border-radius:6px; '
+                    f'padding:12px 16px; text-align:center;">'
+                    f'<div style="font-family:\'Courier New\',monospace; font-size:0.7rem; '
+                    f'color:#8b949e; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px;">Max |z|</div>'
+                    f'<div style="font-family:\'Courier New\',monospace; font-size:1.4rem; '
+                    f'font-weight:700; color:#58a6ff;">{max_z:.1f}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            
+            # Scatter chart
+            with st.container(border=True):
+                st.markdown(
+                    '<div style="font-family:\'Courier New\',monospace; font-size:0.85rem; color:#58a6ff; margin-bottom:0.75rem;">ANOMALOUS DAYS TIMELINE</div>',
+                    unsafe_allow_html=True,
+                )
+                spread_label_anom = _spread_label(anom_col) if anom_col.startswith("spread_") else None
+                fig_anom = anomaly_scatter_chart(filtered_df, anom_col, anomalies, "Spread", spread_label_anom)
+                st.plotly_chart(fig_anom, use_container_width=True)
+            
+            # Fundamentals table
+            fund_df = build_anomaly_fundamentals(
+                filtered_df, anomalies.index, controls["region"], anom_col=anom_col
+            )
+            
+            if not fund_df.empty:
+                # Merge anomalies with fundamentals
+                display_df = anomalies.reset_index()
+                val_label = "Avg Spread ($/MWh)"
+                display_df.columns = ["Date", val_label, "Z-Score", "Direction"]
+                display_df["Date"] = display_df["Date"].dt.strftime("%Y-%m-%d")
+                merged = display_df.merge(fund_df, on="Date", how="left")
+                
+                with st.container(border=True):
+                    st.markdown(
+                        '<div style="font-family:\'Courier New\',monospace; font-size:0.85rem; color:#58a6ff; margin-bottom:0.75rem;">ANOMALOUS DAY FUNDAMENTALS</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.dataframe(
+                        merged.head(30),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            val_label: st.column_config.NumberColumn(format="$%.2f"),
+                            "Z-Score": st.column_config.NumberColumn(format="%.2f"),
+                        },
+                    )
+                
+                # Radar chart deep dive
+                if len(merged) > 0:
+                    with st.container(border=True):
+                        st.markdown(
+                            '<div style="font-family:\'Courier New\',monospace; font-size:0.85rem; color:#58a6ff; margin-bottom:0.75rem;">DEEP DIVE — COMPARE ANOMALOUS DAY VS BASELINE</div>',
+                            unsafe_allow_html=True,
+                        )
+                        selected_day = st.selectbox(
+                            "Select Anomalous Day",
+                            options=merged["Date"].tolist(),
+                            key="radar_day_select",
+                        )
+                        
+                        # Prepare data for radar chart
+                        row = merged[merged["Date"] == selected_day].iloc[0]
+                        fundamental_labels = [c for c in merged.columns 
+                                           if c not in ("Date", val_label, "Z-Score", "Direction")]
+                        
+                        anom_row = {}
+                        for lab in fundamental_labels:
+                            val = row.get(lab)
+                            if pd.notna(val):
+                                anom_row[lab] = float(val)
+                        
+                        # Calculate baseline
+                        effective_region = controls["region"]
+                        if controls["region"] == "all":
+                            effective_region = zone_from_column(anom_col) or "coast"
+                        
+                        baseline = {}
+                        col_map = {
+                            "Temp (°C)": ZONE_TEMP_COL.get(effective_region),
+                            "Humidity (%)": ZONE_HUMIDITY_COL.get(effective_region),
+                            "Heat Index (°F)": ZONE_HEAT_INDEX_COL.get(effective_region),
+                            "Wind Gen (MW)": ZONE_WIND_COL.get(effective_region),
+                            "Solar Gen (MW)": ZONE_SOLAR_COL.get(effective_region),
+                            "Load (MW)": ZONE_LOAD_MAP.get(effective_region),
+                            "Net Load (MW)": ZONE_NET_LOAD_MAP.get(effective_region),
+                        }
+                        
+                        for lab in fundamental_labels:
+                            col = col_map.get(lab)
+                            if col and col in filtered_df.columns:
+                                baseline[lab] = float(filtered_df[col].mean())
+                        
+                        if anom_row and baseline:
+                            fig_radar = anomaly_fundamentals_radar(anom_row, baseline, selected_day)
+                            st.plotly_chart(fig_radar, use_container_width=True)
+                            st.caption(
+                                "Values shown as % of baseline period average. "
+                                "100% = at baseline. >100% = above average."
+                            )
+
+    with analysis_tab3:
+        st.caption(
+            "Planning for a future day? Enter expected conditions below and find "
+            "the most similar historical days. Their spread outcomes give you a "
+            "data-driven prior for what to expect."
+        )
+
+        # Build available fundamental inputs
+        # When region="all", default to Houston zone for fundamentals
+        _sim_region = controls["region"]
+        if controls["region"] == "all":
+            _sim_region = "coast"
+        
+        available_inputs = {}
+        for label, col_map_dict in [
+            ("Temp (°C)", ZONE_TEMP_COL),
+            ("Humidity (%)", ZONE_HUMIDITY_COL),
+            ("Heat Index (°F)", ZONE_HEAT_INDEX_COL),
+            ("Wind Gen (MW)", ZONE_WIND_COL),
+            ("Solar Gen (MW)", ZONE_SOLAR_COL),
+            ("Load (MW)", ZONE_LOAD_MAP),
+        ]:
+            col = col_map_dict.get(_sim_region)
+            if col and col in filtered_df.columns:
+                series = filtered_df[col].dropna()
+                if not series.empty:
+                    available_inputs[label] = {
+                        "col": col,
+                        "min": float(series.min()),
+                        "max": float(series.max()),
+                        "mean": float(series.mean()),
+                        "p25": float(series.quantile(0.25)),
+                        "p75": float(series.quantile(0.75)),
+                    }
+
+        if not available_inputs:
+            st.info("No fundamental columns available for this region.")
+        else:
+            with st.container(border=True):
+                _card_label("Target Day Conditions")
+                st.markdown(
+                    '<div style="font-size:0.8rem; color:#8b949e; margin-bottom:12px;">'
+                    'Set your expected conditions. Defaults are period averages. '
+                    'Sliders show the historical range.</div>',
+                    unsafe_allow_html=True,
+                )
+
+                # Create input sliders in columns
+                target_values = {}
+                n_inputs = len(available_inputs)
+                cols_per_row = 3
+                labels = list(available_inputs.keys())
+
+                for row_start in range(0, n_inputs, cols_per_row):
+                    row_labels = labels[row_start:row_start + cols_per_row]
+                    cols = st.columns(len(row_labels))
+                    for col_ui, lab in zip(cols, row_labels):
+                        info = available_inputs[lab]
+                        with col_ui:
+                            target_values[lab] = st.slider(
+                                lab,
+                                min_value=info["min"],
+                                max_value=info["max"],
+                                value=info["mean"],
+                                key=f"sim_{lab}",
+                                help=f"Historical range: {info['min']:.1f} – {info['max']:.1f}",
+                            )
+
+                sim_n = st.slider(
+                    "Number of Similar Days",
+                    min_value=5, max_value=50, value=15, step=5,
+                    key="sim_n_days",
+                )
+
+            # Find similar days
+            if target_values:
+                similar_df = find_similar_days(
+                    filtered_df, target_values, controls["region"], spread_col, n=sim_n
+                )
+
+                if similar_df.empty:
+                    st.info("Not enough historical data to find similar days.")
+                else:
+                    # Determine outcome column name
+                    outcome_col = "Avg Spread ($/MWh)" if "Avg Spread ($/MWh)" in similar_df.columns else "Avg Price ($/MWh)"
+                    if outcome_col not in similar_df.columns:
+                        # Fallback — find the first matching column
+                        outcome_col = next(
+                            (c for c in similar_df.columns if "Avg" in c and "$/MWh" in c),
+                            None,
+                        )
+
+                    if outcome_col and outcome_col in similar_df.columns:
+                        values = similar_df[outcome_col]
+                        sm1, sm2, sm3, sm4 = st.columns(4)
+                        with sm1:
+                            _kpi_card(f"Expected Spread", f"${values.mean():.2f}", "#58a6ff",
+                                      f"Mean of {len(similar_df)} similar days")
+                        with sm2:
+                            _kpi_card("Upside (P75)", f"${values.quantile(0.75):.2f}", "#7ab8ff")  # Lighter blue
+                        with sm3:
+                            _kpi_card("Downside (P25)", f"${values.quantile(0.25):.2f}", "#94a3b8")  # Grey
+                        with sm4:
+                            pct_positive = (values > 0).mean() * 100
+                            _kpi_card("% Positive", f"{pct_positive:.0f}%", "#58a6ff")
+
+                    # Distribution chart + table side by side
+                    col_sim_l, col_sim_r = st.columns([2, 3])
+
+                    with col_sim_l:
+                        with st.container(border=True):
+                            fig_sim_dist = similar_days_spread_distribution(
+                                similar_df, col_label="Spread",
+                            )
+                            st.plotly_chart(fig_sim_dist, use_container_width=True)
+
+                    with col_sim_r:
+                        with st.container(border=True):
+                            _card_label("Similar Days Detail")
+                            st.dataframe(
+                                similar_df,
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={
+                                    "Distance": st.column_config.NumberColumn(format="%.3f"),
+                                },
+                            )
+
+    with analysis_tab4:
         st.caption(
             "Regime analysis showing how different factors drive spread behavior. "
             "Use these views to understand the fundamental drivers of price spreads."

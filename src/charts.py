@@ -4,6 +4,9 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+# Import zone mappings for anomaly detection and similar days
+from src.kpis import ZONE_LOAD_MAP, ZONE_NET_LOAD_MAP, ZONE_WIND_COL, ZONE_SOLAR_COL
+
 REGION_HEAT_INDEX = {
     "coast": "COAST_Heat_Index",
     "south": "SOUTH_Heat_Index",
@@ -1035,4 +1038,455 @@ def compute_monthly_stats(
             result[col] = result[col].round(2)
     
     return result
+
+
+# ── Anomaly Detection ──────────────────────────────────────────────────────
+
+# Zone mappings for weather and grid fundamentals
+ZONE_TEMP_COL = {
+    "coast": "temperature_C",
+    "south": "temperature_S",
+    "west": "temperature_W",
+    "north": "temperature_N",
+    "east": "temperature_E",
+}
+
+ZONE_HUMIDITY_COL = {
+    "coast": "relative_humidity_C",
+    "south": "relative_humidity_S",
+    "west": "relative_humidity_W",
+    "north": "relative_humidity_N",
+    "east": "relative_humidity_E",
+}
+
+ZONE_HEAT_INDEX_COL = {
+    "coast": "COAST_Heat_Index",
+    "south": "SOUTH_Heat_Index",
+    "west": "WEST_Heat_Index",
+    "north": "NORTH_Heat_Index",
+    "east": "EAST_Heat_Index",
+}
+
+LZ_PRICE_COLS = {
+    "LZ_HOUSTON_DAM": "Houston",
+    "LZ_SOUTH_DAM": "South",
+    "LZ_WEST_DAM": "West",
+    "LZ_NORTH_DAM": "North",
+    "LZ_RAYBN_DAM": "Rayburn",
+}
+
+
+def zone_from_column(col: str) -> str | None:
+    """Extract zone from spread or LZ column name."""
+    if col.startswith("spread_"):
+        parts = col.replace("spread_", "").split("_")
+        if parts:
+            zone_map = {"h": "coast", "s": "south", "w": "west", "n": "north", "r": "east"}
+            return zone_map.get(parts[0])
+    elif col in LZ_PRICE_COLS:
+        lz_to_zone = {
+            "LZ_HOUSTON_DAM": "coast",
+            "LZ_SOUTH_DAM": "south",
+            "LZ_WEST_DAM": "west",
+            "LZ_NORTH_DAM": "north",
+            "LZ_RAYBN_DAM": "east",
+        }
+        return lz_to_zone.get(col)
+    return None
+
+
+def detect_anomalous_days(
+    df: pd.DataFrame,
+    spread_col: str,
+    z_threshold: float = 2.0,
+) -> pd.DataFrame:
+    """
+    Identify days where the daily average spread is anomalous (|z-score| > threshold).
+    
+    Returns DataFrame indexed by date with columns:
+        avg_spread, z_score, direction ('Spike' or 'Crash')
+    sorted by |z_score| descending.
+    """
+    if df.empty or spread_col not in df.columns:
+        return pd.DataFrame()
+    
+    # Resample to daily averages
+    daily = df[spread_col].resample("D").mean().dropna()
+    if len(daily) < 10:  # Need sufficient data for meaningful statistics
+        return pd.DataFrame()
+    
+    # Calculate z-scores
+    mean = daily.mean()
+    std = daily.std()
+    if std == 0:
+        return pd.DataFrame()
+    
+    z = (daily - mean) / std
+    mask = z.abs() >= z_threshold
+    
+    anomalies = pd.DataFrame({
+        "avg_spread": daily[mask].round(2),
+        "z_score": z[mask].round(2),
+    })
+    anomalies["direction"] = anomalies["z_score"].apply(
+        lambda x: "Spike" if x > 0 else "Crash"
+    )
+    
+    # Sort by absolute z-score (most extreme first)
+    anomalies = anomalies.reindex(
+        anomalies["z_score"].abs().sort_values(ascending=False).index
+    )
+    
+    return anomalies
+
+
+def anomaly_scatter_chart(
+    df: pd.DataFrame,
+    spread_col: str,
+    anomalies: pd.DataFrame,
+    col_label: str = "Spread",
+    spread_label: str | None = None,
+) -> go.Figure:
+    """Spread time series with anomalous days highlighted as large markers."""
+    if df.empty or spread_col not in df.columns:
+        return go.Figure()
+    
+    # Resample to daily averages
+    daily = df[spread_col].resample("D").mean().dropna()
+    if daily.empty:
+        return go.Figure()
+    
+    fig = go.Figure()
+    
+    # Normal days as line
+    fig.add_trace(go.Scatter(
+        x=daily.index, y=daily.values,
+        mode="lines", name="Daily Avg Spread",
+        line=dict(color="#94a3b8", width=1),
+        opacity=0.5,
+        hovertemplate="%{x|%b %d %Y}<br>$%{y:.2f}/MWh<extra></extra>",
+    ))
+    
+    if not anomalies.empty:
+        # Spikes (positive anomalies) - use blue for terminal theme
+        spikes = anomalies[anomalies["direction"] == "Spike"]
+        if not spikes.empty:
+            fig.add_trace(go.Scatter(
+                x=spikes.index, y=spikes["avg_spread"],
+                mode="markers", name="Spike",
+                marker=dict(
+                    size=10, 
+                    color="#58a6ff",  # Blue for spikes (terminal theme)
+                    symbol="triangle-up", 
+                    line=dict(width=1, color="#0a0e17")
+                ),
+                hovertemplate="SPIKE<br>%{x|%b %d %Y}<br>$%{y:.2f}/MWh<br>z=%{customdata:.1f}<extra></extra>",
+                customdata=spikes["z_score"],
+            ))
+        
+        # Crashes (negative anomalies) - use lighter blue/grey
+        crashes = anomalies[anomalies["direction"] == "Crash"]
+        if not crashes.empty:
+            fig.add_trace(go.Scatter(
+                x=crashes.index, y=crashes["avg_spread"],
+                mode="markers", name="Crash",
+                marker=dict(
+                    size=10, 
+                    color="#7ab8ff",  # Lighter blue for crashes
+                    symbol="triangle-down", 
+                    line=dict(width=1, color="#0a0e17")
+                ),
+                hovertemplate="CRASH<br>%{x|%b %d %Y}<br>$%{y:.2f}/MWh<br>z=%{customdata:.1f}<extra></extra>",
+                customdata=crashes["z_score"],
+            ))
+    
+    fig.add_hline(y=0, line_dash="dash", line_color="#475569", line_width=1)
+    
+    # Apply dark theme
+    title_suffix = f" — {spread_label}" if spread_label else ""
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="#0a0e17",
+        plot_bgcolor="#111827",
+        font=dict(family="monospace", color="#94a3b8", size=11),
+        height=420,
+        title=f"Anomalous {col_label} Days{title_suffix}",
+        yaxis_title=f"Avg {col_label} ($/MWh)",
+        xaxis=dict(gridcolor="#1e2d40"),
+        yaxis=dict(gridcolor="#1e2d40"),
+        hovermode="x unified",
+        legend=dict(orientation="h", y=1.02, x=0),
+        margin=dict(l=60, r=20, t=60, b=40),
+    )
+    
+    return fig
+
+
+def build_anomaly_fundamentals(
+    df: pd.DataFrame,
+    anomaly_dates: pd.DatetimeIndex,
+    region: str,
+    anom_col: str | None = None,
+) -> pd.DataFrame:
+    """
+    For each anomalous date, compute daily averages of all fundamentals.
+    
+    Returns DataFrame with one row per anomalous day.
+    """
+    if df.empty or len(anomaly_dates) == 0:
+        return pd.DataFrame()
+    
+    # Determine effective region for column mapping
+    effective_region = region
+    if region == "all" and anom_col:
+        effective_region = zone_from_column(anom_col) or "coast"
+    
+    # Map fundamental labels to column names
+    col_mapping = {
+        "Temp (°C)": ZONE_TEMP_COL.get(effective_region),
+        "Humidity (%)": ZONE_HUMIDITY_COL.get(effective_region),
+        "Heat Index (°F)": ZONE_HEAT_INDEX_COL.get(effective_region),
+        "Wind Gen (MW)": ZONE_WIND_COL.get(effective_region),
+        "Solar Gen (MW)": ZONE_SOLAR_COL.get(effective_region),
+        "Load (MW)": ZONE_LOAD_MAP.get(effective_region),
+        "Net Load (MW)": ZONE_NET_LOAD_MAP.get(effective_region),
+    }
+    
+    # Filter to only available columns
+    fundamental_cols = {label: col for label, col in col_mapping.items() 
+                       if col and col in df.columns}
+    
+    if not fundamental_cols:
+        return pd.DataFrame()
+    
+    # Build rows for each anomalous day
+    rows = []
+    for dt in anomaly_dates:
+        day_mask = df.index.date == dt.date() if hasattr(dt, 'date') else df.index.date == dt
+        day_df = df[day_mask]
+        if day_df.empty:
+            continue
+        
+        row = {"Date": dt.strftime("%Y-%m-%d") if hasattr(dt, 'strftime') else str(dt)}
+        for label, col in fundamental_cols.items():
+            row[label] = round(day_df[col].mean(), 1) if col in day_df.columns else None
+        rows.append(row)
+    
+    return pd.DataFrame(rows)
+
+
+def anomaly_fundamentals_radar(
+    anomaly_row: dict,
+    baseline_row: dict,
+    date_label: str,
+) -> go.Figure:
+    """Radar chart comparing anomalous day fundamentals vs baseline averages."""
+    categories = list(anomaly_row.keys())
+    if not categories:
+        return go.Figure()
+    
+    anom_vals = [anomaly_row[k] for k in categories]
+    base_vals = [baseline_row[k] for k in categories]
+    
+    # Normalize to baseline = 100%
+    norm_anom = []
+    norm_base = []
+    for a, b in zip(anom_vals, base_vals):
+        if b and b != 0:
+            norm_anom.append(round(a / b * 100, 1) if a else 0)
+            norm_base.append(100.0)
+        else:
+            norm_anom.append(0)
+            norm_base.append(100.0)
+    
+    fig = go.Figure()
+    
+    # Baseline (dashed circle at 100%)
+    fig.add_trace(go.Scatterpolar(
+        r=norm_base + [norm_base[0]],
+        theta=categories + [categories[0]],
+        fill="toself",
+        fillcolor="rgba(148,163,184,0.1)",
+        line=dict(color="#94a3b8", width=1, dash="dash"),
+        name="Baseline (100%)",
+    ))
+    
+    # Anomalous day
+    fig.add_trace(go.Scatterpolar(
+        r=norm_anom + [norm_anom[0]],
+        theta=categories + [categories[0]],
+        fill="toself",
+        fillcolor="rgba(88,166,255,0.15)",
+        line=dict(color="#58a6ff", width=2),
+        name=date_label,
+    ))
+    
+    max_val = max(norm_anom + [150]) if norm_anom else 150
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="#0a0e17",
+        plot_bgcolor="#111827",
+        font=dict(family="monospace", color="#94a3b8", size=11),
+        height=350,
+        title=f"Fundamentals — {date_label}",
+        polar=dict(
+            bgcolor="#111827",
+            radialaxis=dict(
+                visible=True, 
+                gridcolor="#1e2d40",
+                ticksuffix="%", 
+                range=[0, max_val]
+            ),
+            angularaxis=dict(gridcolor="#1e2d40"),
+        ),
+        legend=dict(orientation="h", y=-0.1, x=0.5, xanchor="center"),
+        showlegend=True,
+        margin=dict(l=60, r=60, t=60, b=40),
+    )
+    
+    return fig
+
+
+# ── Similar Days Lookup ──────────────────────────────────────────────────
+
+def find_similar_days(
+    df: pd.DataFrame,
+    target_values: dict,
+    region: str,
+    spread_col: str,
+    n: int = 10,
+) -> pd.DataFrame:
+    """
+    Find the N most similar historical days to a set of target fundamental values.
+
+    Uses normalized Euclidean distance across available fundamentals.
+
+    Parameters
+    ----------
+    df            : full (unfiltered) regional DataFrame
+    target_values : dict mapping feature labels → target values
+    region        : region name
+    spread_col    : spread column for computing daily spread
+    n             : number of similar days to return
+
+    Returns
+    -------
+    DataFrame with columns: Date, distance, avg_spread, + each fundamental
+    """
+    if df.empty or spread_col not in df.columns:
+        return pd.DataFrame()
+
+    # When region="all", infer zone from the spread column
+    effective_region = region
+    if region == "all":
+        effective_region = zone_from_column(spread_col) or "coast"
+
+    # Map user-facing labels to data columns
+    label_to_col = {}
+    for label, col in [
+        ("Temp (°C)", ZONE_TEMP_COL.get(effective_region)),
+        ("Humidity (%)", ZONE_HUMIDITY_COL.get(effective_region)),
+        ("Heat Index (°F)", ZONE_HEAT_INDEX_COL.get(effective_region)),
+        ("Wind Gen (MW)", ZONE_WIND_COL.get(effective_region)),
+        ("Solar Gen (MW)", ZONE_SOLAR_COL.get(effective_region)),
+        ("Load (MW)", ZONE_LOAD_MAP.get(effective_region)),
+    ]:
+        if col and col in df.columns and label in target_values:
+            label_to_col[label] = col
+
+    if not label_to_col:
+        return pd.DataFrame()
+
+    # Build daily averages
+    daily_cols = list(label_to_col.values()) + [spread_col]
+    daily = df[daily_cols].resample("D").mean().dropna()
+    if len(daily) < 5:
+        return pd.DataFrame()
+
+    # Normalize using z-scores
+    means = daily.mean()
+    stds = daily.std().replace(0, 1)
+    normalized = (daily - means) / stds
+
+    # Compute distance from target
+    target_norm = {}
+    for label, col in label_to_col.items():
+        val = target_values[label]
+        target_norm[col] = (val - means[col]) / stds[col]
+
+    dist = pd.Series(0.0, index=normalized.index)
+    for col, norm_val in target_norm.items():
+        dist += (normalized[col] - norm_val) ** 2
+    dist = dist ** 0.5
+
+    # Get top N
+    top_idx = dist.nsmallest(n).index
+    result = daily.loc[top_idx].copy()
+    result["Distance"] = dist.loc[top_idx].round(3)
+    outcome_label = "Avg Price ($/MWh)" if "spread_" not in spread_col else "Avg Spread ($/MWh)"
+    result[outcome_label] = result[spread_col].round(2)
+
+    # Rename columns to friendly labels
+    for label, col in label_to_col.items():
+        result[label] = result[col].round(1)
+
+    # Clean up
+    keep_cols = ["Distance", outcome_label] + list(label_to_col.keys())
+    result = result[keep_cols]
+    result.index.name = "Date"
+    result = result.reset_index()
+    result["Date"] = result["Date"].dt.strftime("%Y-%m-%d")
+    result = result.sort_values("Distance")
+
+    return result
+
+
+def similar_days_spread_distribution(
+    similar_days_df: pd.DataFrame,
+    col_label: str = "Spread",
+) -> go.Figure:
+    """Histogram of spreads/prices from similar days with stats annotation."""
+    outcome_col = "Avg Spread ($/MWh)" if "Avg Spread ($/MWh)" in similar_days_df.columns else "Avg Price ($/MWh)"
+    if similar_days_df.empty or outcome_col not in similar_days_df.columns:
+        return go.Figure()
+
+    values = similar_days_df[outcome_col]
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Histogram(
+        x=values,
+        nbinsx=max(5, len(values) // 2),
+        marker_color="#58a6ff",  # Blue accent for terminal theme
+        opacity=0.8,
+        name="Similar Days",
+        hovertemplate=f"{col_label}: $%{{x:.2f}}/MWh<br>Count: %{{y}}<extra></extra>",
+    ))
+
+    avg = values.mean()
+    fig.add_vline(
+        x=avg,
+        line_dash="dash",
+        line_color="#7ab8ff",  # Lighter blue for terminal theme
+        line_width=2,
+        annotation_text=f"Mean: ${avg:.2f}",
+        annotation_font=dict(color="#7ab8ff", size=11)
+    )
+
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="#0a0e17",
+        plot_bgcolor="#111827",
+        font=dict(family="monospace", color="#94a3b8", size=11),
+        height=350,
+        title=f"{col_label} Distribution of Similar Days",
+        xaxis_title=f"Avg {col_label} ($/MWh)",
+        yaxis_title="Count",
+        xaxis=dict(gridcolor="#1e2d40"),
+        yaxis=dict(gridcolor="#1e2d40"),
+        showlegend=False,
+        margin=dict(l=60, r=20, t=80, b=40),
+    )
+
+    return fig
 
