@@ -163,11 +163,14 @@ def train_model(
     mae    = float(mean_absolute_error(y_test, y_pred))
     rmse   = float(np.sqrt(mean_squared_error(y_test, y_pred)))
 
-    # Direction accuracy — only meaningful for spread targets
-    if target_col in SPREAD_COLS:
-        direction_acc = float(
-            np.mean(np.sign(y_pred) == np.sign(y_test.values)) * 100
-        )
+    # Direction accuracy — only meaningful for spread targets and only when
+    # we actually have a non-empty test set. Previously, if aggressive
+    # filtering left zero rows in the test slice, np.mean was applied to an
+    # empty array and returned NaN, which then surfaced in the Drivers page.
+    if target_col in SPREAD_COLS and len(y_test) > 0:
+        acc = np.mean(np.sign(y_pred) == np.sign(y_test.values)) * 100
+        # Guard against any numerical edge cases returning NaN
+        direction_acc = float(acc) if not np.isnan(acc) else None
     else:
         direction_acc = None
 
