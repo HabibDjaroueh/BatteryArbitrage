@@ -23,6 +23,15 @@ from src.forecast_error import (
     monthly_error_breakdown,
     capture_ratio_distribution,
 )
+from src.risk import (
+    compute_risk_metrics,
+    compute_seasonal_reliability,
+    compute_drawdown_series,
+)
+from src.charts import (
+    cumulative_revenue_with_drawdown,
+    monthly_revenue_box_plot,
+)
 
 
 def _section_header(label: str) -> None:
@@ -74,14 +83,6 @@ def main() -> None:
         "Forecast-driven dispatch using XGBoost price forecasts submitted "
         "by 10:00 AM CPT the prior day. All revenue settled at LZ_HOUSTON_DAM. "
         "See the Assumptions page for full model boundaries."
-    )
-
-    # Sidebar — region locked to Houston
-    st.sidebar.markdown("### Battery Configuration")
-    st.sidebar.markdown(
-        "Battery location is fixed to **Houston (LZ_HOUSTON_DAM)**. "
-        "The forecast model predicts Houston DAM prices and all revenue "
-        "is settled at the Houston DAM zonal price.",
     )
 
     # Load data
@@ -320,17 +321,14 @@ def main() -> None:
     _section_header("Forecast Model Quality")
     st.caption(
         "XGBoost model trained to predict LZ_HOUSTON_DAM hourly prices. "
-        "Features lagged 24 hours — no lookahead. "
-        "Direction accuracy measures how often the model correctly predicts "
-        "whether Houston price is above or below the daily average — "
-        "the signal used for dispatch decisions."
+        "Features lagged 24 hours — no lookahead."
     )
 
     acc = forecast_accuracy(forecast_df)
     kpis = dam_campaign_kpis(dam_campaign, spec)
 
     with st.container(border=True):
-        fq1, fq2, fq3, fq4 = st.columns(4)
+        fq1, fq2, fq3 = st.columns(3)
         fq1.metric(
             "Forecast MAE",
             f"${acc['mae']:.2f}/MWh",
@@ -342,14 +340,6 @@ def main() -> None:
             help="Root mean squared error — penalises large misses more heavily",
         )
         fq3.metric(
-            "Direction Accuracy",
-            f"{acc['direction_accuracy']:.1f}%",
-            help=(
-                "% of hours where price direction was correctly predicted. "
-                "50% = random. 65%+ = useful signal. 75%+ = strong."
-            ),
-        )
-        fq4.metric(
             "Hours Forecasted",
             f"{acc['n_hours']:,}",
             help="Total hours in simulation window with forecast and actual prices",
@@ -486,6 +476,82 @@ def main() -> None:
             help="Days where forecast caused net losses",
         )
 
+    # ── Risk Analysis Section ────────────────────────────────────────────────
+    st.divider()
+    _section_header("Risk Analysis")
+    st.caption(
+        "Downside risk metrics from the forecast-driven DAM campaign. "
+        "Helps assess revenue reliability and worst-case scenarios."
+    )
+
+    risk = compute_risk_metrics(analysis_df)
+
+    with st.container(border=True):
+        r1, r2, r3, r4, r5 = st.columns(5)
+        r1.metric(
+            "Daily VaR (5%)",
+            f"${risk['daily_var_5pct']:,.0f}",
+            help="5th percentile daily revenue — on 95% of days you earn more than this.",
+        )
+        r2.metric(
+            "CVaR / Exp. Shortfall",
+            f"${risk['cvar_5pct']:,.0f}",
+            help="Average revenue on the worst 5% of days.",
+        )
+        r3.metric(
+            "Max Drawdown",
+            f"${risk['max_drawdown']:,.0f}",
+            help=(
+                "Largest peak-to-trough decline in cumulative revenue "
+                f"({risk['max_drawdown_days']} days)."
+            ),
+        )
+        r4.metric(
+            "Sharpe Ratio",
+            f"{risk['sharpe_ratio']:.2f}",
+            help=(
+                "Annualised risk-adjusted return (mean / std × sqrt(252)). "
+                "Higher is better."
+            ),
+        )
+        r5.metric(
+            "Longest Losing Streak",
+            f"{risk['longest_losing_streak']} days",
+            help="Maximum consecutive days with zero or negative revenue.",
+        )
+
+    dd_series = compute_drawdown_series(analysis_df)
+    with st.container(border=True):
+        _card_label("Cumulative Revenue & Drawdown")
+        fig_dd = cumulative_revenue_with_drawdown(dd_series)
+        st.plotly_chart(fig_dd, use_container_width=True)
+
+    with st.container(border=True):
+        _card_label("Seasonal Reliability — Daily Revenue by Month")
+        fig_box = monthly_revenue_box_plot(analysis_df)
+        st.plotly_chart(fig_box, use_container_width=True)
+
+    seasonal = compute_seasonal_reliability(analysis_df)
+    with st.expander("Seasonal Reliability Table"):
+        with st.container(border=True):
+            st.dataframe(
+                seasonal,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Month": st.column_config.TextColumn("Month", width="small"),
+                    "Mean ($)": st.column_config.NumberColumn(format="$%,.0f"),
+                    "Std ($)": st.column_config.NumberColumn(format="$%,.0f"),
+                    "Min ($)": st.column_config.NumberColumn(format="$%,.0f"),
+                    "Max ($)": st.column_config.NumberColumn(format="$%,.0f"),
+                    "Days": st.column_config.NumberColumn(format="%d"),
+                    "Reliable": st.column_config.CheckboxColumn(
+                        "Reliable",
+                        help="Month where std < mean and mean > 0 (consistent revenue).",
+                    ),
+                },
+            )
+
     # Revenue Comparison Chart
     _section_header("DAM Campaign Details")
 
@@ -593,15 +659,10 @@ def main() -> None:
     # DAM Campaign KPIs
     dam_kpis = dam_campaign_kpis(dam_campaign, spec)
     with st.container(border=True):
-        k1, k2, k3, k4 = st.columns(4)
+        k1, k2, k3 = st.columns(3)
         k1.metric("Profitable Days", f"{dam_kpis['profitable_days_pct']:.1f}%")
         k2.metric("Best Day", f"${dam_kpis['best_day']:,.2f}")
         k3.metric("Worst Day", f"${dam_kpis['worst_day']:,.2f}")
-        k4.metric(
-            "SoC Violations",
-            f"{dam_kpis['total_soc_violations']}",
-            help="Hours where physical SoC constraints clipped the bid schedule",
-        )
 
     # Monthly Breakdown
     monthly = monthly_error_breakdown(analysis_df)

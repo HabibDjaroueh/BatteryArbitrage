@@ -16,19 +16,52 @@ REGION_HEAT_INDEX = {
 }
 
 SPREAD_COLOR_MAP = {
-    "spread_h_s": "#38bdf8",   # sky blue    — Houston vs South
-    "spread_h_n": "#34d399",   # emerald     — Houston vs North
-    "spread_h_w": "#fb923c",   # orange      — Houston vs West
-    "spread_h_r": "#f472b6",   # pink        — Houston vs East
-    "spread_n_s": "#a78bfa",   # purple      — North vs South
-    "spread_n_w": "#fbbf24",   # amber       — North vs West
-    "spread_n_r": "#e879f9",   # fuchsia     — North vs East
-    "spread_s_w": "#4ade80",   # green       — South vs West
-    "spread_s_r": "#f87171",   # red         — South vs East
-    "spread_w_r": "#67e8f9",   # cyan        — West vs East
-    "spread_r_n": "#818cf8",   # indigo      — East vs North
-    "spread_r_w": "#fb7185",   # rose        — East vs West
+    "spread_h_s": "#38bdf8",  # sky blue
+    "spread_h_n": "#60a5fa",  # light blue
+    "spread_h_w": "#93c5fd",  # softer blue
+    "spread_h_r": "#7dd3fc",  # cyan-blue
+    "spread_n_s": "#1d4ed8",  # deep blue
+    "spread_n_w": "#2563eb",  # medium blue
+    "spread_n_r": "#0ea5e9",  # bright cyan
+    "spread_s_w": "#3b82f6",  # primary blue
+    "spread_s_r": "#1e40af",  # navy blue
+    "spread_w_r": "#38bdf8",  # sky blue
+    "spread_r_n": "#6366f1",  # indigo-leaning blue
+    "spread_r_w": "#4f46e5",  # indigo-deep blue
 }
+
+CHART_THEME = {
+    "template": "plotly_dark",
+    "paper_bgcolor": "#0a0e17",
+    "plot_bgcolor": "#111827",
+    "font": dict(family="monospace", color="#94a3b8", size=11),
+    "gridcolor": "#1e2d40",
+    "zero_line_color": "#475569",
+    "accent": "#58a6ff",
+}
+
+STANDARD_HEIGHT = 420
+
+
+def _apply_base_layout(
+    fig: go.Figure,
+    title: str,
+    height: int = STANDARD_HEIGHT,
+    margin: dict | None = None,
+) -> None:
+    """Apply consistent base layout to any figure."""
+    standard_margin = dict(l=60, r=20, t=80, b=40)
+    fig.update_layout(
+        title=title,
+        template=CHART_THEME["template"],
+        paper_bgcolor=CHART_THEME["paper_bgcolor"],
+        plot_bgcolor=CHART_THEME["plot_bgcolor"],
+        font=CHART_THEME["font"],
+        margin=margin or standard_margin,
+        height=height,
+    )
+    fig.update_xaxes(gridcolor=CHART_THEME["gridcolor"])
+    fig.update_yaxes(gridcolor=CHART_THEME["gridcolor"])
 
 
 def _spread_label(spread_col: str) -> str:
@@ -1344,6 +1377,122 @@ def anomaly_fundamentals_radar(
         margin=dict(l=60, r=60, t=60, b=40),
     )
     
+    return fig
+
+
+def cumulative_revenue_with_drawdown(drawdown_df: pd.DataFrame) -> go.Figure:
+    """
+    Two-panel chart: cumulative revenue (top) and drawdown (bottom).
+    """
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        row_heights=[0.7, 0.3],
+        vertical_spacing=0.06,
+    )
+
+    # Top: cumulative revenue and running max
+    fig.add_trace(
+        go.Scatter(
+            x=drawdown_df["date"],
+            y=drawdown_df["cumulative_revenue"],
+            name="Cumulative Revenue",
+            line=dict(color=CHART_THEME["accent"], width=2),
+            fill="tozeroy",
+            fillcolor="rgba(88,166,255,0.10)",
+        ),
+        row=1,
+        col=1,
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=drawdown_df["date"],
+            y=drawdown_df["running_max"],
+            name="Peak",
+            line=dict(color="#94a3b8", width=1, dash="dot"),
+        ),
+        row=1,
+        col=1,
+    )
+
+    # Bottom: drawdown bars (negative)
+    fig.add_trace(
+        go.Bar(
+            x=drawdown_df["date"],
+            y=drawdown_df["drawdown"],
+            name="Drawdown",
+            marker_color="#1e40af",
+            opacity=0.7,
+        ),
+        row=2,
+        col=1,
+    )
+
+    _apply_base_layout(fig, "Cumulative Revenue & Drawdown", height=500)
+    fig.update_yaxes(
+        title_text="Cumulative Revenue ($)",
+        row=1,
+        col=1,
+        gridcolor=CHART_THEME["gridcolor"],
+    )
+    fig.update_yaxes(
+        title_text="Drawdown ($)",
+        row=2,
+        col=1,
+        gridcolor=CHART_THEME["gridcolor"],
+    )
+    fig.update_layout(
+        legend=dict(orientation="h", y=1.06, x=0),
+    )
+    return fig
+
+
+def monthly_revenue_box_plot(analysis_df: pd.DataFrame) -> go.Figure:
+    """
+    Box plot of daily revenue grouped by calendar month.
+    """
+    df = analysis_df.copy()
+    df["month_label"] = pd.to_datetime(df["date"]).dt.strftime("%b")
+    df["month_num"] = pd.to_datetime(df["date"]).dt.month
+
+    month_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    present_months = sorted(df["month_num"].unique())
+    ordered_labels = [month_order[m - 1] for m in present_months]
+
+    fig = go.Figure()
+    for m_num, m_label in zip(present_months, ordered_labels):
+        month_data = df[df["month_num"] == m_num]["dam_revenue"]
+        if month_data.empty:
+            continue
+        color = CHART_THEME["accent"]
+        fig.add_trace(
+            go.Box(
+                y=month_data,
+                name=m_label,
+                marker_color=color,
+                line_color=color,
+                boxmean=True,
+            )
+        )
+
+    fig.add_hline(
+        y=0,
+        line_color=CHART_THEME["zero_line_color"],
+        line_width=1,
+    )
+
+    _apply_base_layout(
+        fig,
+        "Daily Revenue by Month — Seasonal Reliability",
+        height=STANDARD_HEIGHT,
+    )
+    fig.update_layout(
+        yaxis_title="Daily Revenue ($)",
+        showlegend=False,
+    )
     return fig
 
 
