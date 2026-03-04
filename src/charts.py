@@ -760,3 +760,279 @@ def net_load_vs_price(
 
     return fig
 
+
+# ── Monthly & Day Analysis ─────────────────────────────────────────────────
+
+def monthly_spread_heatmap(
+    df: pd.DataFrame,
+    spread_col: str,
+    col_label: str = "Spread",
+    spread_label: str | None = None,
+) -> go.Figure:
+    """
+    Calendar heatmap showing daily average spreads by month and day of month.
+    
+    Parameters
+    ----------
+    df          : filtered regional DataFrame with datetime index
+    spread_col  : column containing spread values
+    col_label   : label for the column (e.g., "Spread" or "Price")
+    spread_label: formatted spread label for title (e.g., "H → S")
+    """
+    if df.empty or spread_col not in df.columns:
+        return go.Figure()
+    
+    # Resample hourly data to daily averages
+    daily = df[spread_col].resample("D").mean().dropna()
+    if daily.empty:
+        return go.Figure()
+    
+    # Create pivot table: rows = Year-Month, cols = Day-of-Month
+    pivot_df = daily.to_frame("spread")
+    pivot_df["year_month"] = pivot_df.index.strftime("%Y-%m")
+    pivot_df["day"] = pivot_df.index.day
+    pivot = pivot_df.pivot_table(index="year_month", columns="day", values="spread")
+    
+    if pivot.empty:
+        return go.Figure()
+    
+    # Use blue-based colorscale (Blues or Viridis) instead of RdYlGn
+    # Center at zero for balanced visualization
+    fig = go.Figure(go.Heatmap(
+        z=pivot.values,
+        x=[str(d) for d in pivot.columns],
+        y=pivot.index.tolist(),
+        colorscale="Blues",  # Blue-based instead of red-green
+        zmid=0,  # Center at zero
+        colorbar=dict(title="$/MWh", thickness=12),
+        hovertemplate="Month: %{y}<br>Day: %{x}<br>Spread: $%{z:.2f}/MWh<extra></extra>",
+    ))
+    
+    # Apply dark theme styling
+    title_suffix = f" — {spread_label}" if spread_label else ""
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="#0a0e17",
+        plot_bgcolor="#111827",
+        font=dict(family="monospace", color="#94a3b8", size=11),
+        height=max(300, len(pivot) * 22),  # Dynamic height based on months
+        title=f"Monthly {col_label} Heatmap{title_suffix}",
+        xaxis_title="Day of Month",
+        yaxis_title="",
+        yaxis_autorange="reversed",  # Show most recent months at top
+        margin=dict(l=60, r=20, t=60, b=40),
+    )
+    return fig
+
+
+def monthly_summary_bars(
+    df: pd.DataFrame,
+    spread_col: str,
+    col_label: str = "Spread",
+    spread_label: str | None = None,
+) -> go.Figure:
+    """
+    Monthly average spreads with capture rate overlay.
+    
+    Parameters
+    ----------
+    df          : filtered regional DataFrame with datetime index
+    spread_col  : column containing spread values
+    col_label   : label for the column (e.g., "Spread" or "Price")
+    spread_label: formatted spread label for title (e.g., "H → S")
+    """
+    if df.empty or spread_col not in df.columns:
+        return go.Figure()
+    
+    # Group by month and calculate metrics
+    tmp = df[[spread_col]].copy()
+    tmp["year_month"] = tmp.index.to_period("M").astype(str)
+    
+    monthly = tmp.groupby("year_month")[spread_col].agg(
+        avg_spread="mean",
+        favorable_hours=lambda x: (x > 0).sum(),
+        total_hours="count",
+    )
+    monthly["capture_rate"] = (monthly["favorable_hours"] / monthly["total_hours"] * 100).round(1)
+    monthly = monthly.reset_index()
+    
+    if monthly.empty:
+        return go.Figure()
+    
+    # Create subplot with secondary y-axis
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    
+    # Color bars based on positive/negative spread
+    # Use blue for positive, grey for negative (terminal theme)
+    colors = ["#58a6ff" if v > 0 else "#94a3b8" for v in monthly["avg_spread"]]
+    
+    # Add bar chart for average spread
+    fig.add_trace(go.Bar(
+        x=monthly["year_month"], 
+        y=monthly["avg_spread"],
+        name="Avg Spread", 
+        marker_color=colors, 
+        opacity=0.8,
+        hovertemplate="%{x}<br>Avg: $%{y:.2f}/MWh<extra></extra>",
+    ), secondary_y=False)
+    
+    # Add line chart for capture rate
+    fig.add_trace(go.Scatter(
+        x=monthly["year_month"], 
+        y=monthly["capture_rate"],
+        name="Capture Rate (%)", 
+        mode="lines+markers",
+        line=dict(color="#58a6ff", width=2),
+        marker=dict(size=5),
+        hovertemplate="%{x}<br>Capture: %{y:.1f}%<extra></extra>",
+    ), secondary_y=True)
+    
+    # Styling
+    fig.add_hline(y=0, line_dash="dash", line_color="#475569", line_width=1, secondary_y=False)
+    title_suffix = f" — {spread_label}" if spread_label else ""
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="#0a0e17",
+        plot_bgcolor="#111827",
+        font=dict(family="monospace", color="#94a3b8", size=11),
+        height=420,
+        xaxis=dict(tickangle=-45, gridcolor="#1e2d40"),
+        hovermode="x unified",
+        legend=dict(orientation="h", y=1.08, x=0),
+        margin=dict(l=60, r=60, t=60, b=40),
+    )
+    fig.update_yaxes(
+        title_text=f"Avg {col_label} ($/MWh)",
+        gridcolor="#1e2d40",
+        secondary_y=False,
+    )
+    fig.update_yaxes(
+        title_text="Capture Rate (%)",
+        showgrid=False,
+        secondary_y=True,
+    )
+    
+    return fig
+
+
+def day_of_week_spread(
+    df: pd.DataFrame,
+    spread_col: str,
+    col_label: str = "Spread",
+    spread_label: str | None = None,
+) -> go.Figure:
+    """
+    Distribution analysis by weekday vs weekend patterns.
+    
+    Parameters
+    ----------
+    df          : filtered regional DataFrame with datetime index
+    spread_col  : column containing spread values
+    col_label   : label for the column (e.g., "Spread" or "Price")
+    spread_label: formatted spread label for title (e.g., "H → S")
+    """
+    if df.empty or spread_col not in df.columns:
+        return go.Figure()
+    
+    DOW_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    tmp = df[[spread_col]].copy()
+    tmp["dow"] = tmp.index.dayofweek
+    
+    # Colors: weekdays in blue, weekends in lighter blue/grey (terminal theme)
+    colors = ["#58a6ff"] * 5 + ["#7ab8ff"] * 2  # Weekdays: bright blue, weekends: lighter blue
+    
+    fig = go.Figure()
+    
+    for i, day_name in enumerate(DOW_NAMES):
+        day_data = tmp[tmp["dow"] == i][spread_col].dropna()
+        if not day_data.empty:
+            fig.add_trace(go.Box(
+                y=day_data, 
+                name=day_name,
+                marker_color=colors[i],
+                boxmean=True,  # Show mean line
+                hovertemplate=f"{day_name}<br>%{{y:.2f}} $/MWh<extra></extra>",
+            ))
+    
+    if len(fig.data) == 0:
+        return go.Figure()
+    
+    fig.add_hline(y=0, line_dash="dash", line_color="#475569", line_width=1)
+    
+    title_suffix = f" — {spread_label}" if spread_label else ""
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="#0a0e17",
+        plot_bgcolor="#111827",
+        font=dict(family="monospace", color="#94a3b8", size=11),
+        height=420,
+        title=f"{col_label} by Day of Week{title_suffix}",
+        yaxis_title=f"{col_label} ($/MWh)",
+        yaxis=dict(gridcolor="#1e2d40"),
+        showlegend=False,
+        margin=dict(l=60, r=20, t=60, b=40),
+    )
+    
+    return fig
+
+
+def compute_monthly_stats(
+    df: pd.DataFrame,
+    spread_col: str,
+    lz_col: str | None = None,
+) -> pd.DataFrame:
+    """
+    Detailed monthly metrics in tabular format.
+    
+    Parameters
+    ----------
+    df         : filtered regional DataFrame with datetime index
+    spread_col  : column containing spread values
+    lz_col      : optional LZ price column for reference
+    
+    Returns
+    -------
+    pd.DataFrame with monthly statistics
+    """
+    if df.empty or spread_col not in df.columns:
+        return pd.DataFrame()
+    
+    tmp = df.copy()
+    tmp["year_month"] = tmp.index.to_period("M")
+    
+    # Calculate monthly aggregations
+    agg = tmp.groupby("year_month").agg(
+        avg_spread=(spread_col, "mean"),
+        max_spread=(spread_col, "max"),
+        min_spread=(spread_col, "min"),
+        std_spread=(spread_col, "std"),
+        favorable_hrs=(spread_col, lambda x: (x > 0).sum()),
+        total_hrs=(spread_col, "count"),
+    )
+    
+    # Add LZ price if available
+    if lz_col and lz_col in df.columns:
+        agg["avg_price"] = tmp.groupby("year_month")[lz_col].mean()
+    else:
+        agg["avg_price"] = float("nan")
+    
+    # Calculate capture rate
+    agg["capture_rate"] = (agg["favorable_hrs"] / agg["total_hrs"] * 100).round(1)
+    agg.index = agg.index.astype(str)
+    agg.index.name = "Month"
+    result = agg.reset_index()
+    
+    # Rename columns for display
+    result.columns = [
+        "Month", "Avg Spread ($/MWh)", "Max Spread ($/MWh)", "Min Spread ($/MWh)",
+        "Volatility (Std)", "Favorable Hrs", "Total Hrs",
+        "Avg LZ Price ($/MWh)", "Capture Rate (%)",
+    ]
+    
+    # Round numeric columns
+    for col in result.columns:
+        if col != "Month" and result[col].dtype in ("float64", "float32"):
+            result[col] = result[col].round(2)
+    
+    return result
+

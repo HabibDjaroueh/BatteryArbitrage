@@ -19,6 +19,10 @@ from src.charts import (
     renewables_vs_spread,
     net_load_time_series,
     net_load_duck_curve,
+    monthly_spread_heatmap,
+    monthly_summary_bars,
+    day_of_week_spread,
+    compute_monthly_stats,
     SPREAD_COLOR_MAP,
     _spread_label,
 )
@@ -223,14 +227,14 @@ def main() -> None:
             fig_hist = spread_histogram(filtered_df, selected_spreads)
             st.plotly_chart(fig_hist, use_container_width=True)
 
-    # 6. Regime tabs
+    # 6. Analysis Tabs
     st.divider()
     st.markdown(
-        '<div style="font-family: \'Courier New\', monospace; font-size: 1.1rem; color: #58a6ff; text-transform: uppercase; letter-spacing: 0.1em; margin: 2rem 0 1rem 0; border-bottom: 1px solid #30363d; padding-bottom: 0.5rem;">Why Is This Spread Happening?</div>',
+        '<div style="font-family: \'Courier New\', monospace; font-size: 1.1rem; color: #58a6ff; text-transform: uppercase; letter-spacing: 0.1em; margin: 2rem 0 1rem 0; border-bottom: 1px solid #30363d; padding-bottom: 0.5rem;">Analysis</div>',
         unsafe_allow_html=True,
     )
 
-    # Custom tab styling - card-like appearance with light blue and orange
+    # Custom tab styling - terminal theme with blue accent (no red)
     st.markdown(
         """
         <style>
@@ -268,6 +272,7 @@ def main() -> None:
             color: #0a0e17 !important;
             border-color: #58a6ff !important;
             font-weight: 600 !important;
+            border-bottom: 2px solid #58a6ff !important;
         }
         
         button[data-baseweb="tab"][aria-selected="false"] {
@@ -278,74 +283,146 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    tab1, tab2, tab3 = st.tabs(
+    # Analysis tabs with terminal styling
+    analysis_tab1, analysis_tab2 = st.tabs(
         [
-            "Net Load vs Spread",
-            "Renewables vs Spread",
-            "Net Load Views",
+            "Monthly & Day Analysis",
+            "Spread Regimes",
         ]
     )
 
-    with tab1:
+    with analysis_tab1:
         st.caption(
-            "How does regional load level drive the spread? "
-            "A rising line means high load widens the spread. "
-            "Load is reported in MW — ERCOT regional zones typically range "
-            "from 5,000 MW (5 GW) off-peak to 25,000 MW (25 GW) at summer peak. "
-            "The orange dotted line shows heat index (°F) — when both load "
-            "and heat index are high simultaneously, spread spikes are most likely."
+            f"Monthly and day-of-week patterns in spread behavior. "
+            "Use these views to identify seasonal trading windows "
+            "and weekly scheduling patterns for battery dispatch."
         )
+        
+        spread_label = _spread_label(spread_col)
+        lz_col = get_lz_col(controls["region"])
+        
+        # 1. Calendar Heatmap (full width)
         with st.container(border=True):
-            fig_nl = net_load_vs_spread(
-                filtered_df, spread_col, load_col, controls["region"]
+            st.markdown(
+                '<div style="font-family:\'Courier New\',monospace; font-size:0.85rem; color:#58a6ff; margin-bottom:0.75rem;">CALENDAR HEATMAP</div>',
+                unsafe_allow_html=True,
             )
-            st.plotly_chart(fig_nl, use_container_width=True)
-
-    with tab2:
-        st.caption(
-            "How do wind and solar suppress or amplify the spread? "
-            "Green markers = positive spread, red = negative."
-        )
+            fig_heatmap = monthly_spread_heatmap(filtered_df, spread_col, "Spread", spread_label)
+            st.plotly_chart(fig_heatmap, use_container_width=True)
+        
+        # 2. Monthly bars (left) + Day of week (right)
+        col_mon_l, col_mon_r = st.columns([3, 2])
+        
+        with col_mon_l:
+            with st.container(border=True):
+                fig_monthly = monthly_summary_bars(filtered_df, spread_col, "Spread", spread_label)
+                st.plotly_chart(fig_monthly, use_container_width=True)
+        
+        with col_mon_r:
+            with st.container(border=True):
+                fig_dow = day_of_week_spread(filtered_df, spread_col, "Spread", spread_label)
+                st.plotly_chart(fig_dow, use_container_width=True)
+        
+        # 3. Monthly Statistics Table (full width)
         with st.container(border=True):
-            fig_re = renewables_vs_spread(filtered_df, spread_col, controls["region"])
-            st.plotly_chart(fig_re, use_container_width=True)
+            st.markdown(
+                '<div style="font-family:\'Courier New\',monospace; font-size:0.85rem; color:#58a6ff; margin-bottom:0.75rem;">MONTHLY STATISTICS</div>',
+                unsafe_allow_html=True,
+            )
+            monthly_stats = compute_monthly_stats(filtered_df, spread_col, lz_col)
+            
+            if not monthly_stats.empty:
+                st.dataframe(
+                    monthly_stats,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Avg Spread ($/MWh)": st.column_config.NumberColumn(format="$%.2f"),
+                        "Max Spread ($/MWh)": st.column_config.NumberColumn(format="$%.2f"),
+                        "Min Spread ($/MWh)": st.column_config.NumberColumn(format="$%.2f"),
+                        "Avg LZ Price ($/MWh)": st.column_config.NumberColumn(format="$%.2f"),
+                        "Capture Rate (%)": st.column_config.ProgressColumn(
+                            format="%.1f%%", min_value=0, max_value=100,
+                        ),
+                    },
+                )
+            else:
+                st.info("No data available for the current filter selection.")
 
-    with tab3:
+    with analysis_tab2:
         st.caption(
-            "Three views of net load (regional load minus wind and solar). "
-            "Net load is the most direct signal of grid stress — "
-            "high net load means renewables aren't covering demand, "
-            "prices rise and spreads widen. Use these charts to identify "
-            "the net load thresholds where battery dispatch becomes valuable."
+            "Regime analysis showing how different factors drive spread behavior. "
+            "Use these views to understand the fundamental drivers of price spreads."
         )
-
-        subtab1, subtab2 = st.tabs(
+        # Move the existing regime tabs content here
+        tab1, tab2, tab3 = st.tabs(
             [
-                "📅  Time Series",
-                "🦆  Duck Curve",
+                "Net Load vs Spread",
+                "Renewables vs Spread",
+                "Net Load Views",
             ]
         )
 
-        with subtab1:
+        with tab1:
             st.caption(
-                "Daily net load vs spread over the filtered window. "
-                "Look for periods where net load spikes coincide "
-                "with spread widening — these are the high-value dispatch windows."
+                "How does regional load level drive the spread? "
+                "A rising line means high load widens the spread. "
+                "Load is reported in MW — ERCOT regional zones typically range "
+                "from 5,000 MW (5 GW) off-peak to 25,000 MW (25 GW) at summer peak. "
+                "The orange dotted line shows heat index (°F) — when both load "
+                "and heat index are high simultaneously, spread spikes are most likely."
             )
             with st.container(border=True):
-                fig_nl_ts = net_load_time_series(filtered_df, load_col, spread_col)
-                st.plotly_chart(fig_nl_ts, use_container_width=True)
+                fig_nl = net_load_vs_spread(
+                    filtered_df, spread_col, load_col, controls["region"]
+                )
+                st.plotly_chart(fig_nl, use_container_width=True)
 
-        with subtab2:
+        with tab2:
             st.caption(
-                "Average net load by hour of day, split by year. "
-                "The deepening midday trough shows solar growth. "
-                "The steepening evening ramp is the primary battery "
-                "arbitrage opportunity — charge in the trough, discharge on the ramp."
+                "How do wind and solar suppress or amplify the spread? "
+                "Green markers = positive spread, red = negative."
             )
             with st.container(border=True):
-                fig_duck = net_load_duck_curve(filtered_df, load_col)
-                st.plotly_chart(fig_duck, use_container_width=True)
+                fig_re = renewables_vs_spread(filtered_df, spread_col, controls["region"])
+                st.plotly_chart(fig_re, use_container_width=True)
+
+        with tab3:
+            st.caption(
+                "Three views of net load (regional load minus wind and solar). "
+                "Net load is the most direct signal of grid stress — "
+                "high net load means renewables aren't covering demand, "
+                "prices rise and spreads widen. Use these charts to identify "
+                "the net load thresholds where battery dispatch becomes valuable."
+            )
+
+            subtab1, subtab2 = st.tabs(
+                [
+                    "Time Series",
+                    "Duck Curve",
+                ]
+            )
+
+            with subtab1:
+                st.caption(
+                    "Daily net load vs spread over the filtered window. "
+                    "Look for periods where net load spikes coincide "
+                    "with spread widening — these are the high-value dispatch windows."
+                )
+                with st.container(border=True):
+                    fig_nl_ts = net_load_time_series(filtered_df, load_col, spread_col)
+                    st.plotly_chart(fig_nl_ts, use_container_width=True)
+
+            with subtab2:
+                st.caption(
+                    "Average net load by hour of day, split by year. "
+                    "The deepening midday trough shows solar growth. "
+                    "The steepening evening ramp is the primary battery "
+                    "arbitrage opportunity — charge in the trough, discharge on the ramp."
+                )
+                with st.container(border=True):
+                    fig_duck = net_load_duck_curve(filtered_df, load_col)
+                    st.plotly_chart(fig_duck, use_container_width=True)
 
     # 7. Opportunity table + export
     st.divider()
