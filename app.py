@@ -238,7 +238,6 @@ def main() -> None:
             <div class="kpi-tile">
                 <div class="kpi-label">Mode</div>
                 <div class="kpi-value">Energy Arbitrage</div>
-                <div class="kpi-note">AS module coming soon</div>
             </div>
         </div>
         """,

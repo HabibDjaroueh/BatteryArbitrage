@@ -30,6 +30,7 @@ from src.charts import (
     anomaly_fundamentals_radar,
     find_similar_days,
     similar_days_spread_distribution,
+    compute_regime_signal,
     zone_from_column,
     ZONE_TEMP_COL,
     ZONE_HUMIDITY_COL,
@@ -62,6 +63,53 @@ def _kpi_card(label: str, value: str, color: str = "#58a6ff", sub: str = "") -> 
         f'<div style="font-family:\'Courier New\',monospace; font-size:1.4rem; '
         f'font-weight:700; color:{color};">{value}</div>'
         f'{sub_html}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _regime_badge(regime: str, strength: int, vol_regime: str) -> None:
+    """
+    Render a regime indicator badge showing Bullish/Bearish/Neutral status.
+    
+    Parameters
+    ----------
+    regime : 'Bullish' / 'Bearish' / 'Neutral' / 'N/A'
+    strength : Signal strength (0-100)
+    vol_regime : 'High Vol' / 'Low Vol' / 'Normal' / 'N/A'
+    """
+    # Color scheme adapted for terminal theme (blue/grey, no red/green)
+    regime_colors = {
+        "Bullish": ("#58a6ff", "#0d2847"),      # Blue text, dark blue bg
+        "Bearish": ("#7ab8ff", "#1a3a5c"),     # Lighter blue text, darker blue bg
+        "Neutral": ("#94a3b8", "#1e293b"),      # Gray text, dark gray bg
+        "N/A": ("#475569", "#1e293b"),          # Muted gray
+    }
+    
+    # Volatility regime colors (terminal theme)
+    vol_colors = {
+        "High Vol": "#7ab8ff",   # Lighter blue
+        "Low Vol": "#58a6ff",    # Blue
+        "Normal": "#94a3b8",     # Gray
+        "N/A": "#475569",        # Muted gray
+    }
+    
+    # Get colors for current regime
+    text_color, bg_color = regime_colors.get(regime, ("#94a3b8", "#1e293b"))
+    vol_color = vol_colors.get(vol_regime, "#94a3b8")
+
+    # Render badge HTML
+    st.markdown(
+        f'<div style="background:{bg_color}; border:1px solid {text_color}40; border-radius:8px; '
+        f'padding:16px; text-align:center;">'
+        f'<div style="font-family:\'Courier New\',monospace; font-size:0.7rem; '
+        f'color:#8b949e; text-transform:uppercase; letter-spacing:0.08em;">Regime</div>'
+        f'<div style="font-family:\'Courier New\',monospace; font-size:1.6rem; '
+        f'font-weight:700; color:{text_color}; margin:4px 0;">{regime}</div>'
+        f'<div style="display:flex; justify-content:center; gap:12px; margin-top:6px;">'
+        f'<span style="font-size:0.75rem; color:{vol_color};">{vol_regime}</span>'
+        f'<span style="font-size:0.75rem; color:#8b949e;">Strength: {strength}/100</span>'
+        f'</div>'
         f'</div>',
         unsafe_allow_html=True,
     )
@@ -153,13 +201,14 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    header_cols = st.columns([1.2, 1, 1, 1, 1, 1])
-    header_cols[0].markdown("**Spread**")
-    header_cols[1].markdown("**Avg Spread**")
-    header_cols[2].markdown("**30D Volatility**")
-    header_cols[3].markdown("**Capture Rate**")
-    header_cols[4].markdown("**RE Pressure**")
-    header_cols[5].markdown("**Net Load Stress**")
+    header_cols = st.columns([1.3, 1.2, 1, 1, 1, 1, 1])
+    header_cols[0].markdown("**Regime**")
+    header_cols[1].markdown("**Spread**")
+    header_cols[2].markdown("**Avg Spread**")
+    header_cols[3].markdown("**30D Volatility**")
+    header_cols[4].markdown("**Capture Rate**")
+    header_cols[5].markdown("**RE Pressure (D)**")
+    header_cols[6].markdown("**Net Load Stress (P)**")
 
     st.divider()
 
@@ -195,16 +244,24 @@ def main() -> None:
         premium_label  = ZONE_LABEL.get(premium_zone, "Premium Zone")
         discount_label = ZONE_LABEL.get(discount_zone, "Discount Zone")
 
-        row_cols = st.columns([1.2, 1, 1, 1, 1, 1])
+        # Calculate regime signal
+        regime = compute_regime_signal(snapshot_df, sc)
 
-        row_cols[0].markdown(
+        row_cols = st.columns([1.3, 1.2, 1, 1, 1, 1, 1])
+
+        # Regime badge (first column)
+        with row_cols[0]:
+            _regime_badge(regime["regime"], regime["signal_strength"], regime["vol_regime"])
+
+        # Spread label (second column)
+        row_cols[1].markdown(
             f"<span style='color:{accent}; font-size:18px;'>●</span> "
             f"<span style='font-weight:600; font-size:15px;'>{label}</span>",
             unsafe_allow_html=True,
         )
-        row_cols[1].metric("", kpis["avg_spread"])
-        row_cols[2].metric("", kpis["volatility"])
-        row_cols[3].metric(
+        row_cols[2].metric("", kpis["avg_spread"])
+        row_cols[3].metric("", kpis["volatility"])
+        row_cols[4].metric(
             "",
             kpis["capture_rate"],
             help=(
@@ -214,7 +271,7 @@ def main() -> None:
                 f"50% = random. 65%+ = tradeable signal. 75%+ = strong."
             ),
         )
-        row_cols[4].metric(
+        row_cols[5].metric(
             "",
             kpis["re_curtailment"],
             help=(
@@ -225,7 +282,7 @@ def main() -> None:
                 f"High % = renewables structurally suppressing {discount_label} prices."
             ),
         )
-        row_cols[5].metric(
+        row_cols[6].metric(
             "",
             kpis["net_load_stress"],
             help=(

@@ -1490,3 +1490,107 @@ def similar_days_spread_distribution(
 
     return fig
 
+
+# ── Regime Signal Calculation ──────────────────────────────────────────────
+
+def compute_regime_signal(
+    df: pd.DataFrame,
+    spread_col: str,
+) -> dict:
+    """
+    Compute a trading regime signal based on spread momentum and volatility.
+
+    Parameters
+    ----------
+    df : DataFrame with datetime index
+    spread_col : Column name containing spread or price values (e.g., "spread_h_s" or "LZ_HOUSTON_DAM")
+
+    Returns
+    -------
+    dict with keys:
+        regime: 'Bullish' / 'Bearish' / 'Neutral' / 'N/A'
+        momentum_7d: 7-day spread momentum (current 7d avg vs prior 7d avg)
+        momentum_30d: 30-day trend direction
+        vol_regime: 'High Vol' / 'Low Vol' / 'Normal' / 'N/A'
+        signal_strength: 0-100 composite score
+    """
+    if df.empty or spread_col not in df.columns:
+        return {
+            "regime": "N/A",
+            "momentum_7d": 0,
+            "momentum_30d": 0,
+            "vol_regime": "N/A",
+            "signal_strength": 0,
+        }
+
+    # Resample to daily averages (required for regime calculation)
+    daily = df[spread_col].resample("D").mean().dropna()
+    
+    # Need at least 30 days of data
+    if len(daily) < 30:
+        return {
+            "regime": "N/A",
+            "momentum_7d": 0,
+            "momentum_30d": 0,
+            "vol_regime": "N/A",
+            "signal_strength": 0,
+        }
+
+    # ── 7-Day Momentum Calculation ─────────────────────────────────────────────
+    # Compare last 7 days average vs prior 7 days average
+    last_7d = daily.iloc[-7:].mean()
+    prior_7d = daily.iloc[-14:-7].mean() if len(daily) >= 14 else daily.mean()
+    momentum_7d = last_7d - prior_7d
+    # Positive = recent trend is up, Negative = recent trend is down
+
+    # ── 30-Day Trend Calculation ──────────────────────────────────────────────
+    # Calculate slope of 30-day rolling mean (medium-term trend)
+    rolling_30 = daily.rolling(30).mean().dropna()
+    if len(rolling_30) >= 7:
+        momentum_30d = rolling_30.iloc[-1] - rolling_30.iloc[-7]
+    else:
+        momentum_30d = 0
+    # Positive = medium-term trend is up, Negative = medium-term trend is down
+
+    # ── Volatility Regime Calculation ────────────────────────────────────────
+    # Compare recent volatility (14D) to long-term volatility (60D)
+    vol_14d = daily.iloc[-14:].std() if len(daily) >= 14 else daily.std()
+    vol_60d = daily.iloc[-60:].std() if len(daily) >= 60 else daily.std()
+    vol_ratio = vol_14d / vol_60d if vol_60d > 0 else 1.0
+
+    if vol_ratio > 1.3:
+        vol_regime = "High Vol"  # Recent volatility is 30%+ higher than long-term
+    elif vol_ratio < 0.7:
+        vol_regime = "Low Vol"   # Recent volatility is 30%+ lower than long-term
+    else:
+        vol_regime = "Normal"     # Volatility is within normal range
+
+    # ── Regime Classification ──────────────────────────────────────────────────
+    # Bullish: Both short-term (7D) and medium-term (30D) momentum are positive
+    # Bearish: Both short-term (7D) and medium-term (30D) momentum are negative
+    # Neutral: Mixed signals (one positive, one negative)
+    if momentum_7d > 0 and momentum_30d > 0:
+        regime = "Bullish"
+    elif momentum_7d < 0 and momentum_30d < 0:
+        regime = "Bearish"
+    else:
+        regime = "Neutral"
+
+    # ── Signal Strength Calculation ──────────────────────────────────────────
+    # Strength is based on magnitude of momentum relative to historical volatility
+    # Higher strength = stronger signal relative to normal volatility
+    avg_vol = daily.std()
+    if avg_vol > 0:
+        # Weighted: 7D momentum (50%) + 30D momentum (30%)
+        strength = min(100, int(abs(momentum_7d) / avg_vol * 50 + abs(momentum_30d) / avg_vol * 30))
+    else:
+        strength = 0
+
+    return {
+        "regime": regime,
+        "momentum_7d": round(momentum_7d, 2),
+        "momentum_30d": round(momentum_30d, 2),
+        "vol_regime": vol_regime,
+        "signal_strength": strength,
+    }
+
